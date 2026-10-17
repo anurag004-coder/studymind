@@ -254,8 +254,7 @@ function isValidHumanText(str) {
   // Count printable standard characters (alphanumeric, spaces, punctuation, common symbols)
   const validChars = trimmed.match(/[a-zA-Z0-9\s.,?!:;'"()\[\]\-_/\\%&$#@+=*]/g);
   const validCount = validChars ? validChars.length : 0;
-  const validRatio = validCount / trimmed.length;
-  if (validRatio < 0.70) return false;
+  if (validCount / trimmed.length < 0.75) return false;
 
   // Check for excessive control codes or high-bit mojibake characters
   const mojibakeChars = trimmed.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u00A0-\u00FF\u2200-\u22FF]/g);
@@ -263,9 +262,26 @@ function isValidHumanText(str) {
     return false;
   }
 
-  // Must contain at least one plausible word of 2+ alphanumeric characters
-  const words = trimmed.split(/\s+/).filter((w) => /^[a-zA-Z0-9]{2,}$/.test(w));
-  return words.length >= 1;
+  // Reject strings with high punctuation/symbol density (e.g. CT#A{eT[(R$`_u)
+  const symbolChars = trimmed.match(/[\^\\{}[\]$#@`_~|<>]/g);
+  if (symbolChars && (symbolChars.length / trimmed.length) > 0.08) {
+    return false;
+  }
+
+  // Reject strings made mostly of 1-character tokens (e.g. "R ^ K \ 3 j7 Ln&")
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const singleCharTokens = tokens.filter((t) => t.length === 1 && !['a', 'i', 'A', 'I'].includes(t));
+  if (tokens.length >= 3 && (singleCharTokens.length / tokens.length) > 0.35) {
+    return false;
+  }
+
+  // Must contain at least one real word of 3+ letters
+  const realWords = trimmed.match(/[a-zA-Z]{3,}/g);
+  if (!realWords || realWords.length === 0) {
+    return false;
+  }
+
+  return true;
 }
 
 function sanitizeCustomStore() {
@@ -375,99 +391,6 @@ function setupPdfJsWorker() {
   }
 }
 
-async function extractPdfDirectFallback(file, maybeArrayBuffer) {
-  let bytes = null;
-  try {
-    if (maybeArrayBuffer && maybeArrayBuffer.byteLength > 0) {
-      bytes = new Uint8Array(maybeArrayBuffer);
-    }
-  } catch (e) {
-    bytes = null;
-  }
-  if (!bytes) {
-    try {
-      const freshBuf = await file.arrayBuffer();
-      bytes = new Uint8Array(freshBuf);
-    } catch (e) {
-      console.error('Failed to read file buffer in fallback:', e);
-      return { numPages: 1, pages: [], chunks: [] };
-    }
-  }
-
-  const extractedLines = [];
-
-  function extractLinesFromPdfText(text) {
-    if (!text) return;
-    const tjRegex = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")/g;
-    let match;
-    while ((match = tjRegex.exec(text)) !== null) {
-      const clean = match[1].replace(/\\([()\\])/g, '$1').trim();
-      if (clean.length > 3 && isValidHumanText(clean)) {
-        extractedLines.push(clean);
-      }
-    }
-
-    const tjArrayRegex = /\[([^\]]+)\]\s*TJ/g;
-    while ((match = tjArrayRegex.exec(text)) !== null) {
-      const inner = match[1];
-      const subMatches = inner.match(/\(([^)\\]*(?:\\.[^)\\]*)*)\)/g);
-      if (subMatches) {
-        const line = subMatches
-          .map((s) => s.slice(1, -1).replace(/\\([()\\])/g, '$1').trim())
-          .join(' ');
-        if (line.length > 3 && isValidHumanText(line)) {
-          extractedLines.push(line);
-        }
-      }
-    }
-  }
-
-  // Convert only printable ASCII characters into binaryStr to prevent binary garbage injection
-  let binaryStr = '';
-  const len = bytes.byteLength;
-  const maxRead = Math.min(len, 2 * 1024 * 1024);
-  for (let i = 0; i < maxRead; i++) {
-    const code = bytes[i];
-    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126)) {
-      binaryStr += String.fromCharCode(code);
-    } else {
-      binaryStr += ' ';
-    }
-  }
-
-  extractLinesFromPdfText(binaryStr);
-
-  const validExtracted = extractedLines.filter((l) => isValidHumanText(l));
-
-  if (validExtracted.length === 0) {
-    return { numPages: 1, pages: [], chunks: [] };
-  }
-
-  const rawText = validExtracted.join('\n');
-  const chunks = splitTextIntoChunks(rawText, 450, 60)
-    .filter((txt) => isValidHumanText(txt))
-    .map((text, idx) => ({
-      id: `chunk-fb-${idx}`,
-      page: 1,
-      text,
-      bbox: [0.08, 0.15, 0.92, 0.85],
-      bounding_box: [0.08, 0.15, 0.92, 0.85],
-    }));
-
-  const pages = [
-    {
-      pageNo: 1,
-      image: generateTextPageSvg(file.name, 1, 1, validExtracted.slice(0, 30)),
-      text: rawText,
-      lines: validExtracted.slice(0, 30),
-      width: 600,
-      height: 850,
-    },
-  ];
-
-  return { numPages: 1, pages, chunks };
-}
-
 async function extractDocxFileClientSide(file) {
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
@@ -543,6 +466,9 @@ async function extractPdfClientSide(file) {
       const clonedData = new Uint8Array(freshBuffer.slice(0));
       const loadingTask = pdfjsLib.getDocument({
         data: clonedData,
+        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/',
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
@@ -624,13 +550,20 @@ async function extractPdfClientSide(file) {
       if (allChunks.length > 0) {
         return { numPages, pages, chunks: allChunks };
       }
+
+      return {
+        numPages,
+        pages,
+        chunks: [],
+        error: 'No selectable text found in PDF (scanned or image-only document)',
+      };
     } catch (pdfErr) {
-      console.warn('PDF.js failed, engaging direct stream text fallback parser:', pdfErr);
+      console.warn('PDF.js extraction failed:', pdfErr);
+      return { numPages: 1, pages: [], chunks: [], error: pdfErr.message };
     }
   }
 
-  // Fallback to direct stream parser - always pass file to get fresh un-detached buffer!
-  return await extractPdfDirectFallback(file);
+  return { numPages: 1, pages: [], chunks: [], error: 'PDF parser unavailable' };
 }
 
 async function extractTextFileClientSide(file) {
@@ -4242,7 +4175,17 @@ async function startExamSession() {
     });
 
     currentExamSession = res.session_id;
-    currentExamQuestions = res.questions || [];
+    const rawQuestions = res.questions || [];
+    currentExamQuestions = rawQuestions.filter(
+      (q) =>
+        q &&
+        isValidHumanText(q.stem) &&
+        Array.isArray(q.options) &&
+        q.options.every((opt) => isValidHumanText(opt))
+    );
+    if (currentExamQuestions.length === 0) {
+      currentExamQuestions = demoStore.quizQuestions || [];
+    }
     currentExamIndex = 0;
     examUserAnswers = {};
 
