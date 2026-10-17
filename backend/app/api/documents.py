@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -26,8 +27,10 @@ from app.api.deps import get_current_user
 from app.core.cache import app_cache
 from app.core.file_scanner import FileSecurityScanner
 from app.db.models import Chunk, Document, Job, Page, User, Workspace
-from app.db.models.quiz import Question
+from app.db.models.quiz import Question, Topic
+from app.db.models.study import StudyItem
 from app.db.session import get_db
+from app.ingestion.lexical_index import lexical_index
 
 router = APIRouter(tags=["Documents"])
 
@@ -446,6 +449,9 @@ async def delete_document(
     vector_store = get_vector_store_adapter()
     await vector_store.delete_by_document(document_id, current_user.id)
 
+    # 2b. Purge from in-memory BM25 lexical index
+    lexical_index.delete_by_document(document_id, current_user.id)
+
     # 3. Purge derived questions referencing this document
     del_q_stmt = select(Question).where(
         Question.workspace_id == doc.workspace_id,
@@ -454,6 +460,34 @@ async def delete_document(
     matching_qs = (await db.execute(del_q_stmt)).scalars().all()
     for mq in matching_qs:
         await db.delete(mq)
+
+    # 3b. Purge saved study items referencing this document or its chunks
+    chunk_ids_stmt = select(Chunk.id).where(Chunk.document_id == document_id)
+    doc_chunk_ids = set((await db.execute(chunk_ids_stmt)).scalars().all())
+
+    study_items_stmt = select(StudyItem).where(StudyItem.workspace_id == doc.workspace_id)
+    study_items = (await db.execute(study_items_stmt)).scalars().all()
+    for item in study_items:
+        try:
+            item_cids = json.loads(item.source_chunk_ids) if item.source_chunk_ids else []
+            if any(cid in doc_chunk_ids or cid == document_id for cid in item_cids) or (
+                item.payload_json and document_id in item.payload_json
+            ):
+                await db.delete(item)
+        except Exception:
+            pass
+
+    # 3c. Clean up Topics referencing chunks of this document
+    topic_stmt = select(Topic).where(Topic.workspace_id == doc.workspace_id)
+    topics = (await db.execute(topic_stmt)).scalars().all()
+    for top in topics:
+        try:
+            top_cids = json.loads(top.chunk_ids) if top.chunk_ids else []
+            filtered_cids = [cid for cid in top_cids if cid not in doc_chunk_ids]
+            if len(filtered_cids) != len(top_cids):
+                top.chunk_ids = json.dumps(filtered_cids)
+        except Exception:
+            pass
 
     # 4. Invalidate workspace cache
     app_cache.invalidate_workspace(doc.workspace_id)

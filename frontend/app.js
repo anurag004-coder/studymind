@@ -245,26 +245,52 @@ function saveDemoStoreToStorage() {
   }
 }
 
-// Text validation helper to detect and reject binary garbage, unmapped font glyphs, and mojibake
+// Academic English vocabulary anchor set to verify that a sentence is genuine human text
+// and not hallucinated/corrupted OCR character sequences like "{ @ Sloty 42, Uehadoal..."
+const VALID_HUMAN_ANCHOR_WORDS = new Set([
+  // prepositions & connectors
+  'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'at', 'before', 'behind', 'below',
+  'beneath', 'beside', 'between', 'beyond', 'by', 'down', 'during', 'except', 'for', 'from', 'in', 'inside', 'into',
+  'like', 'near', 'of', 'off', 'on', 'onto', 'out', 'outside', 'over', 'past', 'since', 'through', 'throughout',
+  'to', 'toward', 'towards', 'under', 'underneath', 'until', 'unto', 'up', 'upon', 'with', 'within', 'without', 'via', 'per',
+  // pronouns & conjunctions
+  'and', 'but', 'or', 'nor', 'yet', 'so', 'although', 'because', 'unless', 'while', 'whereas', 'if', 'whether', 'as',
+  'though', 'even', 'that', 'once', 'when', 'whenever', 'where', 'wherever', 'this', 'that', 'these', 'those', 'who',
+  'whom', 'whose', 'which', 'what', 'all', 'any', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some',
+  'such', 'no', 'not', 'only', 'same', 'than', 'too', 'very', 'can', 'will', 'just', 'should', 'now', 'he', 'she',
+  'it', 'we', 'they', 'i', 'you', 'my', 'his', 'her', 'its', 'our', 'their', 'them', 'us', 'me', 'him',
+  // verbs & auxiliary
+  'is', 'am', 'are', 'was', 'were', 'be', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did',
+  'doing', 'would', 'could', 'should', 'may', 'might', 'must', 'generate', 'generates', 'produced', 'produces',
+  'serves', 'served', 'functions', 'acts', 'regulates', 'controls', 'enables', 'modulates', 'facilitates', 'drives',
+  'synthesizes', 'synthesize', 'describes', 'asserts', 'links', 'changes', 'occurs', 'contains', 'explains', 'defines',
+  // academic & STEM terms
+  'study', 'notes', 'lecture', 'chapter', 'page', 'cell', 'cellular', 'respiration', 'energy', 'mitochondria',
+  'atp', 'adenosine', 'triphosphate', 'photosynthesis', 'protein', 'enzyme', 'glucose', 'system', 'theory', 'model',
+  'concept', 'principle', 'equation', 'quantum', 'physics', 'biology', 'chemistry', 'pathway', 'signal', 'brain',
+  'force', 'mass', 'state', 'data', 'law', 'structure', 'process', 'result', 'function', 'reaction'
+]);
+
+// Text validation helper to detect and reject binary garbage, unmapped font glyphs, and OCR noise
 function isValidHumanText(str) {
   if (!str || typeof str !== 'string') return false;
   const trimmed = str.trim();
   if (trimmed.length < 3) return false;
 
+  // Immediately reject strings that begin with OCR garbage / braces / special symbols
+  if (/^[\s{}@~^|\\#$=*]/.test(trimmed)) return false;
+
+  // Reject strings containing braces, tildes, at-signs, backticks, carets, backslashes, or pipes typical of bad OCR
+  if (/[{}@~^|\\`]/g.test(trimmed)) return false;
+
   // Count printable standard characters (alphanumeric, spaces, punctuation, common symbols)
-  const validChars = trimmed.match(/[a-zA-Z0-9\s.,?!:;'"()\[\]\-_/\\%&$#@+=*]/g);
+  const validChars = trimmed.match(/[a-zA-Z0-9\s.,?!:;'"()\-/%&$+=*]/g);
   const validCount = validChars ? validChars.length : 0;
   if (validCount / trimmed.length < 0.75) return false;
 
   // Check for excessive control codes or high-bit mojibake characters
   const mojibakeChars = trimmed.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u00A0-\u00FF\u2200-\u22FF]/g);
-  if (mojibakeChars && (mojibakeChars.length / trimmed.length) > 0.10) {
-    return false;
-  }
-
-  // Reject strings with high punctuation/symbol density (e.g. CT#A{eT[(R$`_u)
-  const symbolChars = trimmed.match(/[\^\\{}[\]$#@`_~|<>]/g);
-  if (symbolChars && (symbolChars.length / trimmed.length) > 0.08) {
+  if (mojibakeChars && (mojibakeChars.length / trimmed.length) > 0.08) {
     return false;
   }
 
@@ -281,6 +307,16 @@ function isValidHumanText(str) {
     return false;
   }
 
+  // If the string contains 4 or more words, ensure it contains at least one common/academic English word
+  // to reject hallucinated pseudo-word strings from cursive handwriting OCR (e.g. "Sloty 42, Uehadoal cartes cailite...")
+  const words = trimmed.toLowerCase().match(/[a-z]{2,}/g) || [];
+  if (words.length >= 4) {
+    const hasAnchorWord = words.some((w) => VALID_HUMAN_ANCHOR_WORDS.has(w));
+    if (!hasAnchorWord) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -288,8 +324,13 @@ function sanitizeCustomStore() {
   let modified = false;
   if (demoStore.customChunks) {
     for (const wsId in demoStore.customChunks) {
+      const activeIds = new Set(
+        ((demoStore.documents && demoStore.documents[wsId]) || []).map((d) => d.id)
+      );
       const orig = demoStore.customChunks[wsId] || [];
-      const filtered = orig.filter((c) => c && c.text && isValidHumanText(c.text));
+      const filtered = orig.filter(
+        (c) => c && c.text && isValidHumanText(c.text) && (activeIds.size === 0 || activeIds.has(c.document_id))
+      );
       if (filtered.length !== orig.length) {
         demoStore.customChunks[wsId] = filtered;
         modified = true;
@@ -353,29 +394,172 @@ function loadDemoStoreFromStorage() {
   }
 }
 
-// Global helper to retrieve any and all uploaded custom chunks across workspaces
-function getAvailableChunks(wsId) {
-  let rawChunks = [];
-  if (wsId && demoStore.customChunks?.[wsId]?.length > 0) {
-    rawChunks = demoStore.customChunks[wsId];
-  } else if (state.currentWorkspaceId && demoStore.customChunks?.[state.currentWorkspaceId]?.length > 0) {
-    rawChunks = demoStore.customChunks[state.currentWorkspaceId];
-  } else {
-    for (const k in demoStore.customChunks) {
-      if (demoStore.customChunks[k] && demoStore.customChunks[k].length > 0) {
-        rawChunks = demoStore.customChunks[k];
-        break;
+// Remove all traces of a document from client-side state, caches, memory, and localStorage
+function removeDocumentFromClientState(docId) {
+  if (!docId) return;
+
+  // 1. Purge all chunks matching this document from demoStore.customChunks
+  if (demoStore.customChunks) {
+    for (const wsKey in demoStore.customChunks) {
+      if (Array.isArray(demoStore.customChunks[wsKey])) {
+        demoStore.customChunks[wsKey] = demoStore.customChunks[wsKey].filter(
+          (c) => c && c.document_id !== docId
+        );
       }
     }
   }
-  if (rawChunks.length === 0 && demoStore.customDocs) {
+
+  // 2. Remove document from demoStore.customDocs and demoStore.customPageImages
+  if (demoStore.customDocs && demoStore.customDocs[docId]) {
+    delete demoStore.customDocs[docId];
+  }
+  if (demoStore.customPageImages && demoStore.customPageImages[docId]) {
+    delete demoStore.customPageImages[docId];
+  }
+
+  // 3. Remove document from demoStore.documents across all workspaces
+  if (demoStore.documents) {
+    for (const wsKey in demoStore.documents) {
+      if (Array.isArray(demoStore.documents[wsKey])) {
+        demoStore.documents[wsKey] = demoStore.documents[wsKey].filter(
+          (d) => d && d.id !== docId
+        );
+      }
+    }
+  }
+
+  // 4. Remove from active state.documents
+  if (Array.isArray(state.documents)) {
+    state.documents = state.documents.filter((d) => d && d.id !== docId);
+    const docCountBadge = document.getElementById('library-doc-count');
+    if (docCountBadge) docCountBadge.textContent = state.documents.length;
+  }
+
+  // 5. If this document was open in the source viewer, reset the viewer
+  if (state.currentViewerDocId === docId) {
+    state.currentViewerDocId = null;
+    state.currentViewerPage = 1;
+    state.currentViewerMaxPages = 1;
+    state.activeCitation = null;
+    const canvas = document.getElementById('source-viewer-canvas');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    const emptyState = document.getElementById('viewer-empty-state');
+    if (emptyState) emptyState.classList.remove('hidden');
+    const docName = document.getElementById('viewer-doc-name');
+    if (docName) docName.textContent = 'No document selected';
+    const totalPagesSpan = document.getElementById('viewer-total-pages');
+    if (totalPagesSpan) totalPagesSpan.textContent = '1';
+    const curPageInput = document.getElementById('viewer-current-page');
+    if (curPageInput) curPageInput.value = '1';
+  }
+
+  // 6. Clear stale study outputs (quiz, flashcards, summary) if they were generated from this document
+  currentFlashcardsList = (currentFlashcardsList || []).filter(
+    (c) => c && c.document_id !== docId
+  );
+  currentFlashcardIndex = 0;
+  isFlashcardFlipped = false;
+
+  const remainingChunks = getAvailableChunks(state.currentWorkspaceId);
+  const flashcardsOutput = document.getElementById('flashcards-output-container');
+  if (flashcardsOutput) {
+    if (currentFlashcardsList.length === 0) {
+      if (remainingChunks.length === 0) {
+        flashcardsOutput.innerHTML = '<div class="tool-placeholder">Upload course notes or slides above, then click &ldquo;Generate More Cards&rdquo; to create revision flashcards.</div>';
+      } else {
+        renderFlashcardCard();
+      }
+    } else {
+      renderFlashcardCard();
+    }
+  }
+
+  if (remainingChunks.length === 0) {
+    const summaryContainer = document.getElementById('summary-output-container');
+    if (summaryContainer) {
+      summaryContainer.innerHTML = '<div class="tool-placeholder">Upload notes or slides above, then click &ldquo;Generate Summary&rdquo; to analyze key concepts.</div>';
+    }
+    const quizContainer = document.getElementById('quiz-output-container');
+    if (quizContainer) {
+      quizContainer.innerHTML = '<div class="tool-placeholder">No quiz questions generated yet. Click &ldquo;Generate Grounded Quiz&rdquo; to test your recall.</div>';
+    }
+  }
+
+  // 7. Persist immediately to localStorage
+  saveDemoStoreToStorage();
+}
+
+function pruneStaleChunksForWorkspace(wsId) {
+  if (!wsId) return;
+  const activeDocs = (demoStore.documents && demoStore.documents[wsId]) || state.documents || [];
+  const activeIds = new Set(activeDocs.map((d) => d.id));
+
+  if (demoStore.customChunks && demoStore.customChunks[wsId]) {
+    if (activeDocs.length === 0 && (!state.documents || state.documents.length === 0)) {
+      demoStore.customChunks[wsId] = [];
+    } else if (activeIds.size > 0) {
+      demoStore.customChunks[wsId] = demoStore.customChunks[wsId].filter(
+        (c) => c && (!c.document_id || activeIds.has(c.document_id))
+      );
+    }
+  }
+
+  if (demoStore.customDocs) {
     for (const dId in demoStore.customDocs) {
+      if (activeIds.size > 0 && !activeIds.has(dId)) {
+        delete demoStore.customDocs[dId];
+        if (demoStore.customPageImages) delete demoStore.customPageImages[dId];
+      }
+    }
+  }
+
+  saveDemoStoreToStorage();
+}
+
+// Global helper to retrieve any and all uploaded custom chunks strictly scoped to active documents in workspace
+function getAvailableChunks(wsId) {
+  const targetWs = wsId || state.currentWorkspaceId;
+
+  // Check if target workspace has a tracked document registry in demoStore
+  const hasTrackedDocs = Boolean(demoStore.documents && Array.isArray(demoStore.documents[targetWs]));
+  const activeDocsInWs = hasTrackedDocs ? demoStore.documents[targetWs] : [];
+  const activeDocIds = new Set(activeDocsInWs.map((d) => d.id));
+
+  if (state.documents && state.documents.length > 0 && (!state.currentWorkspaceId || state.currentWorkspaceId === targetWs)) {
+    state.documents.forEach((d) => activeDocIds.add(d.id));
+  }
+
+  // If this workspace has a tracked document registry and it is completely empty,
+  // then NO active documents exist — return [] immediately.
+  if (hasTrackedDocs && activeDocsInWs.length === 0 && (!state.documents || state.documents.length === 0)) {
+    return [];
+  }
+
+  let rawChunks = [];
+  if (targetWs && demoStore.customChunks?.[targetWs]?.length > 0) {
+    rawChunks = demoStore.customChunks[targetWs];
+  } else if (state.currentWorkspaceId && demoStore.customChunks?.[state.currentWorkspaceId]?.length > 0) {
+    rawChunks = demoStore.customChunks[state.currentWorkspaceId];
+  }
+
+  // If active document IDs are tracked, strictly filter out any chunks belonging to deleted documents
+  if (activeDocIds.size > 0) {
+    rawChunks = rawChunks.filter((c) => c && (!c.document_id || activeDocIds.has(c.document_id)));
+  }
+
+  if (rawChunks.length === 0 && demoStore.customDocs) {
+    const docKeys = activeDocIds.size > 0 ? Array.from(activeDocIds) : Object.keys(demoStore.customDocs);
+    for (const dId of docKeys) {
       const doc = demoStore.customDocs[dId];
-      if (doc.chunks && doc.chunks.length > 0) {
+      if (doc && doc.chunks && doc.chunks.length > 0) {
         rawChunks.push(...doc.chunks);
       }
     }
   }
+
   // Filter out any garbage binary / corrupted chunks
   return (rawChunks || []).filter((c) => c && c.text && isValidHumanText(c.text));
 }
@@ -452,62 +636,151 @@ async function extractDocxFileClientSide(file) {
 }
 
 /**
+ * Preprocesses an HTML canvas for handwriting recognition by normalizing lighting,
+ * boosting faint pencil/pen ink contrast, and brightening background paper.
+ */
+function preprocessCanvasForHandwriting(canvas) {
+  if (!canvas) return;
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+    const len = data.length;
+
+    // 1. Calculate luminance range
+    let minLum = 255;
+    let maxLum = 0;
+    const step = 4 * 8;
+    for (let i = 0; i < len; i += step) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
+    }
+
+    const range = Math.max(20, maxLum - minLum);
+
+    // 2. Adaptive contrast stretching to sharpen handwritten strokes
+    for (let i = 0; i < len; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+      let stretched = ((lum - minLum) / range) * 255;
+      if (stretched < 140) {
+        stretched = Math.max(0, stretched * 0.7);
+      } else {
+        stretched = Math.min(255, stretched * 1.15 + 15);
+      }
+
+      data[i] = stretched;
+      data[i + 1] = stretched;
+      data[i + 2] = stretched;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+  } catch (err) {
+    // Canvas context may be restricted in sandbox; continue gracefully
+  }
+}
+
+/**
  * In-Browser OCR Engine for Study Documents, Lecture Photos & Camera Captures
- * Combines Gemini 1.5 Flash Vision (when key provided) + Client-Side Tesseract.js Worker.
+ * Combines Gemini Vision (with handwriting prompt & model fallback) + Preprocessed Tesseract.js Worker.
  */
 async function performImageOcr(imageSource, label = 'Study Note Image') {
-  // 1. If user supplied Gemini API key, attempt instant Gemini 1.5 Flash Vision OCR
+  // 1. Ensure image is on an optimized canvas (max 1600px dimension)
+  let canvas = null;
+  if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
+    canvas = imageSource;
+  } else if (typeof imageSource === 'string') {
+    canvas = await new Promise((res, rej) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const maxDim = 1600;
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        res(c);
+      };
+      img.onerror = rej;
+      img.src = imageSource;
+    });
+  }
+
+  if (canvas) {
+    preprocessCanvasForHandwriting(canvas);
+  }
+
+  // 2. If user supplied Gemini API key, attempt instant Vision OCR (handles handwriting, cursive, math)
   const geminiKey = typeof localStorage !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
-  if (geminiKey && geminiKey.trim()) {
+  if (geminiKey && geminiKey.trim() && canvas) {
     try {
-      let base64Data = '';
-      let mimeType = 'image/jpeg';
-      if (typeof imageSource === 'string' && imageSource.startsWith('data:')) {
-        const parts = imageSource.split(',');
-        mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-        base64Data = parts[1];
-      } else if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
-        const dataUrl = imageSource.toDataURL('image/jpeg', 0.85);
-        base64Data = dataUrl.split(',')[1];
-      }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const base64Data = dataUrl.split(',')[1];
 
       if (base64Data) {
         const stage = document.getElementById('progress-stage-badge');
-        if (stage) stage.textContent = 'Gemini Vision transcribing notes...';
+        if (stage) stage.textContent = 'Gemini Vision transcribing handwritten notes...';
 
-        const gResp = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey.trim()}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
+        const promptText =
+          'You are an expert handwriting and study material OCR engine. ' +
+          'Transcribe ALL handwritten student notes, cursive text, formulas, equations, diagrams with labels, bullet points, definitions, and remarks from this study image verbatim. ' +
+          'Preserve paragraphs, structure, and line breaks. Return ONLY the transcribed text.';
+
+        const modelsToTry = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+        for (const modelName of modelsToTry) {
+          try {
+            const gResp = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey.trim()}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [
                     {
-                      text: 'You are an accurate study note OCR engine. Transcribe ALL legible text, student handwriting, formulas, bullet points, and definitions from this study image verbatim. Do not hallucinate. Return only the extracted text formatted with clear line breaks.',
-                    },
-                    {
-                      inline_data: {
-                        mime_type: mimeType,
-                        data: base64Data,
-                      },
+                      parts: [
+                        { text: promptText },
+                        {
+                          inline_data: {
+                            mime_type: 'image/jpeg',
+                            data: base64Data,
+                          },
+                        },
+                      ],
                     },
                   ],
-                },
-              ],
-              generationConfig: {
-                temperature: 0.1,
-                maxOutputTokens: 2048,
-              },
-            }),
-          }
-        );
-        if (gResp.ok) {
-          const gData = await gResp.json();
-          const gText = gData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          if (gText && isValidHumanText(gText)) {
-            return gText;
+                  generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 2048,
+                  },
+                }),
+              }
+            );
+            if (gResp.ok) {
+              const gData = await gResp.json();
+              const gText = gData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+              if (gText && isValidHumanText(gText)) {
+                return gText;
+              }
+            }
+          } catch (mErr) {
+            console.warn(`Vision model ${modelName} call failed, trying next:`, mErr);
           }
         }
       }
@@ -516,57 +789,27 @@ async function performImageOcr(imageSource, label = 'Study Note Image') {
     }
   }
 
-  // 2. Client-Side Tesseract.js Worker OCR (Runs 100% offline in browser)
-  if (typeof Tesseract !== 'undefined') {
+  // 3. Client-Side Tesseract.js Worker OCR (Runs 100% offline in browser on preprocessed canvas)
+  if (typeof Tesseract !== 'undefined' && canvas) {
     try {
-      let canvas = null;
-      if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
-        canvas = imageSource;
-      } else if (typeof imageSource === 'string') {
-        canvas = await new Promise((res, rej) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            const c = document.createElement('canvas');
-            // Scale to max 1600px dimension for high speed and mobile memory safety
-            const maxDim = 1600;
-            let w = img.naturalWidth || img.width;
-            let h = img.naturalHeight || img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            c.width = w;
-            c.height = h;
-            const ctx = c.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            res(c);
-          };
-          img.onerror = rej;
-          img.src = imageSource;
-        });
-      }
+      const stage = document.getElementById('progress-stage-badge');
+      const fill = document.getElementById('progress-fill');
+      if (stage) stage.textContent = 'OCR engine initializing...';
 
-      if (canvas) {
-        const stage = document.getElementById('progress-stage-badge');
-        const fill = document.getElementById('progress-fill');
-        if (stage) stage.textContent = 'OCR engine initializing...';
+      const result = await Tesseract.recognize(canvas, 'eng', {
+        logger: (m) => {
+          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+            const pct = Math.round(m.progress * 100);
+            if (stage) stage.textContent = `OCR reading text ${pct}%`;
+            if (fill) fill.style.width = `${Math.min(95, 30 + Math.round(pct * 0.65))}%`;
+          }
+        },
+      });
 
-        const result = await Tesseract.recognize(canvas, 'eng', {
-          logger: (m) => {
-            if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-              const pct = Math.round(m.progress * 100);
-              if (stage) stage.textContent = `OCR reading text ${pct}%`;
-              if (fill) fill.style.width = `${Math.min(95, 30 + Math.round(pct * 0.65))}%`;
-            }
-          },
-        });
-
+      const ocrConfidence = result?.data?.confidence ?? 0;
+      if (ocrConfidence < 60) {
+        console.warn(`Tesseract OCR confidence too low (${ocrConfidence}%), discarding handwriting hallucination.`);
+      } else {
         const rawText = result?.data?.text?.trim() || '';
         const validLines = rawText
           .split(/\r?\n/)
@@ -583,9 +826,9 @@ async function performImageOcr(imageSource, label = 'Study Note Image') {
     }
   }
 
-  // 3. Fallback clean document descriptor
-  const cleanLabel = (label || 'Visual Note').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-  return `Visual Study Material: ${cleanLabel}\nExtracted visual study material from uploaded note image.\nReview the uploaded note image directly in the source viewer for diagrams and formulas.`;
+  // 4. Grounded study material representation for visual & handwritten notes
+  const cleanLabel = (label || 'Handwritten Notes').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+  return `Handwritten Study Notes: ${cleanLabel}\nVisual study notes and handwritten material from ${cleanLabel}.\nReview handwritten equations, annotations, and diagrams in the synchronized source viewer.\nTip: Provide a free Gemini API key in Settings (⚙️) for instant AI handwriting transcription.`;
 }
 
 async function extractPdfClientSide(file) {
@@ -687,12 +930,14 @@ async function extractPdfClientSide(file) {
         });
       }
 
-      // 3. Scanned PDF fallback: If 0 selectable text across pages, run OCR on rendered canvas of first 3 pages
-      if (allChunks.length === 0) {
-        const stage = document.getElementById('progress-stage-badge');
-        if (stage) stage.textContent = 'Scanned PDF: running OCR...';
+      // 2. Scanned / Handwritten PDF Fallback: Run OCR on ANY page that has sparse or no digital text
+      for (let pageNo = 1; pageNo <= numPages; pageNo++) {
+        const pageIdx = pageNo - 1;
+        const pageCurrentText = pages[pageIdx]?.text || '';
+        if (pageCurrentText.trim().length < 25) {
+          const stage = document.getElementById('progress-stage-badge');
+          if (stage) stage.textContent = `Scanned PDF: OCR on page ${pageNo}/${numPages}...`;
 
-        for (let pageNo = 1; pageNo <= Math.min(3, numPages); pageNo++) {
           try {
             const page = await pdf.getPage(pageNo);
             const viewport = page.getViewport({ scale: 1.2 });
@@ -703,11 +948,12 @@ async function extractPdfClientSide(file) {
             await page.render({ canvasContext: ctx, viewport }).promise;
             const pageImgUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-            const ocrText = await performImageOcr(pageImgUrl, `${file.name} (Page ${pageNo})`);
+            pages[pageIdx].image = pageImgUrl;
+
+            const ocrText = await performImageOcr(canvas, `${file.name} (Page ${pageNo})`);
             if (ocrText && isValidHumanText(ocrText)) {
-              pages[pageNo - 1].text = ocrText;
-              pages[pageNo - 1].lines = ocrText.split('\n').filter(Boolean);
-              if (pageNo === 1) pages[0].image = pageImgUrl;
+              pages[pageIdx].text = ocrText;
+              pages[pageIdx].lines = ocrText.split('\n').filter(Boolean);
 
               const pageChunks = splitTextIntoChunks(ocrText, 450, 60).filter((txt) => isValidHumanText(txt));
               const nChunks = Math.max(1, pageChunks.length);
@@ -730,7 +976,7 @@ async function extractPdfClientSide(file) {
       }
 
       if (allChunks.length > 0) {
-        return { docId, numPages, pages, chunks: allChunks };
+        return { docId, numPages, pages, chunks: allChunks, ocr_quality: 'good' };
       }
 
       // Fallback clean chunks if completely blank document
@@ -743,7 +989,7 @@ async function extractPdfClientSide(file) {
         bounding_box: [0.06, 0.12, 0.94, 0.88],
       };
       pages[0].text = fallbackClean;
-      return { docId, numPages, pages, chunks: [fallbackChunk] };
+      return { docId, numPages, pages, chunks: [fallbackChunk], ocr_quality: 'good' };
     } catch (pdfErr) {
       console.warn('PDF.js extraction failed:', pdfErr);
       return { numPages: 1, pages: [], chunks: [], error: pdfErr.message };
@@ -1341,16 +1587,24 @@ ${combinedNotes}`;
   if (geminiResult && Array.isArray(geminiResult.flashcards) && geminiResult.flashcards.length > 0) {
     const validGeminiCards = geminiResult.flashcards
       .filter((fc) => fc && isValidHumanText(fc.question) && isValidHumanText(fc.answer))
-      .map((fc, idx) => ({
-        id: `fc-g-${Date.now()}-${idx}`,
-        question: fc.question,
-        answer: fc.answer,
-        quote: fc.quote || fc.answer.slice(0, 140),
-        citation_quote: fc.quote || fc.answer.slice(0, 140),
-        page: fc.page || 1,
-        document_id: customChunks[0]?.document_id || '',
-        bbox: [0.08, 0.2, 0.92, 0.4],
-      }));
+      .map((fc, idx) => {
+        const quoteText = fc.quote || fc.answer || '';
+        const matchedChunk =
+          customChunks.find((c) => quoteText && c.text && c.text.includes(quoteText.slice(0, 35))) ||
+          customChunks.find((c) => c.page === fc.page) ||
+          customChunks[idx % customChunks.length];
+
+        return {
+          id: `fc-g-${Date.now()}-${idx}`,
+          question: fc.question,
+          answer: fc.answer,
+          quote: (fc.quote || fc.answer).slice(0, 140),
+          citation_quote: (fc.quote || fc.answer).slice(0, 140),
+          page: matchedChunk?.page || fc.page || 1,
+          document_id: matchedChunk?.document_id || customChunks[0]?.document_id || '',
+          bbox: matchedChunk?.bbox || [0.08, 0.2, 0.92, 0.4],
+        };
+      });
     if (validGeminiCards.length > 0) {
       return { flashcards: validGeminiCards.slice(0, count) };
     }
@@ -1432,7 +1686,7 @@ ${combinedNotes}`;
     });
   }
 
-  return { flashcards: cards.length > 0 ? cards : demoStore.flashcards };
+  return { flashcards: cards.length > 0 ? cards : (customChunks.length > 0 ? [] : demoStore.flashcards) };
 }
 
 async function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
@@ -1487,19 +1741,30 @@ ${combinedNotes}`;
           q.correct_answer_index >= 0 &&
           q.correct_answer_index < 4
       )
-      .map((q, idx) => ({
-        id: `q-g-${Date.now()}-${idx}`,
-        type: 'mcq',
-        marks: 1,
-        stem: q.stem,
-        options: q.options,
-        correct_answer_index: q.correct_answer_index,
-        quote: q.quote || (q.options[q.correct_answer_index] || '').slice(0, 140),
-        explanation: q.explanation || 'Verified directly against your course materials.',
-        document_id: customChunks[0]?.document_id || '',
-        page: q.page || 1,
-        bbox: [0.08, 0.2, 0.92, 0.4],
-      }));
+      .map((q, idx) => {
+        const qQuote = (q.quote || '').trim().toLowerCase();
+        const matchedChunk = customChunks.find((c) => {
+          if (!c || !c.text) return false;
+          const cText = c.text.toLowerCase();
+          if (qQuote && (cText.includes(qQuote) || qQuote.includes(cText.slice(0, 40)))) return true;
+          if (q.page && c.page === q.page) return true;
+          return false;
+        }) || customChunks[0];
+
+        return {
+          id: `q-g-${Date.now()}-${idx}`,
+          type: 'mcq',
+          marks: 1,
+          stem: q.stem,
+          options: q.options,
+          correct_answer_index: q.correct_answer_index,
+          quote: q.quote || (q.options[q.correct_answer_index] || '').slice(0, 140),
+          explanation: q.explanation || `Verified directly against ${matchedChunk?.filename || 'your course materials'}.`,
+          document_id: matchedChunk?.document_id || '',
+          page: q.page || matchedChunk?.page || 1,
+          bbox: matchedChunk?.bbox || [0.08, 0.2, 0.92, 0.4],
+        };
+      });
 
     if (validGeminiQuestions.length > 0) {
       return {
@@ -1766,11 +2031,8 @@ async function handleMockApiRequest(endpoint, options = {}) {
   const docDeleteMatch = cleanEp.match(/^\/documents\/([^\/]+)$/);
   if (docDeleteMatch && method === 'DELETE') {
     const dId = docDeleteMatch[1];
-    for (const wsKey in demoStore.documents) {
-      demoStore.documents[wsKey] = demoStore.documents[wsKey].filter((d) => d.id !== dId);
-    }
-    if (demoStore.customDocs) delete demoStore.customDocs[dId];
-    if (demoStore.customPageImages) delete demoStore.customPageImages[dId];
+    removeDocumentFromClientState(dId);
+    saveDemoStoreToStorage();
     return { message: 'Document deleted' };
   }
 
@@ -2209,6 +2471,9 @@ async function loadDocuments() {
     const docs = await apiRequest(`/workspaces/${state.currentWorkspaceId}/documents`);
     state.documents = docs || [];
 
+    // Prune any stale chunks that no longer correspond to active documents
+    pruneStaleChunksForWorkspace(state.currentWorkspaceId);
+
     const docCountBadge = document.getElementById('library-doc-count');
     if (docCountBadge) docCountBadge.textContent = state.documents.length;
 
@@ -2272,6 +2537,8 @@ function renderDocumentsTable() {
       if (!confirm('Are you sure you want to delete this document?')) return;
       try {
         await apiRequest(`/documents/${docId}`, { method: 'DELETE' });
+        removeDocumentFromClientState(docId);
+        saveDemoStoreToStorage();
         showToast('Document deleted', 'info');
         await loadDocuments();
       } catch (err) {
@@ -2414,6 +2681,12 @@ async function handleMultipleFiles(files) {
   if (progressPercent) progressPercent.textContent = '100%';
 
   if (successCount > 0) {
+    // Reset active study caches so newly uploaded material is immediately used
+    currentFlashcardsList = [];
+    currentFlashcardIndex = 0;
+    isFlashcardFlipped = false;
+    state.lastSummaryTakeaways = [];
+
     showToast(
       total === 1
         ? `"${fileList[0].name}" indexed! Ready for study, chat & quizzes.`
@@ -4008,6 +4281,18 @@ function bindStudyToolsEvents() {
         body: JSON.stringify({ count: parseInt(countSelect.value, 10) }),
       });
       const newCards = res.flashcards || [];
+
+      // Collect active document IDs in current workspace
+      const activeDocs = (demoStore.documents && demoStore.documents[state.currentWorkspaceId]) || state.documents || [];
+      const activeDocIds = new Set(activeDocs.map((d) => d.id));
+
+      // Strictly purge any cards belonging to deleted documents before appending
+      if (activeDocIds.size > 0) {
+        currentFlashcardsList = (currentFlashcardsList || []).filter(
+          (c) => c && c.document_id && activeDocIds.has(c.document_id)
+        );
+      }
+
       if (currentFlashcardsList.length === 0) {
         currentFlashcardsList = newCards;
         currentFlashcardIndex = 0;
@@ -4047,8 +4332,13 @@ function bindStudyToolsEvents() {
     currentFlashcardsList = [];
     currentFlashcardIndex = 0;
     isFlashcardFlipped = false;
-    renderFlashcardCard();
-    showToast('Deck reset. Click "Generate More Cards" for a fresh set.', 'info');
+    const available = getAvailableChunks(state.currentWorkspaceId);
+    if (available.length > 0) {
+      document.getElementById('btn-generate-flashcards')?.click();
+    } else {
+      renderFlashcardCard();
+      showToast('Deck reset. Click "Generate More Cards" for a fresh set.', 'info');
+    }
   });
 
   // Quiz generation
@@ -4237,13 +4527,26 @@ function renderFlashcardCard() {
   const container = document.getElementById('flashcards-output-container');
   if (!container) return;
 
-  // Automatically filter out any corrupted or mojibake cards
+  // Active documents in the current workspace
+  const activeDocs = (demoStore.documents && demoStore.documents[state.currentWorkspaceId]) || state.documents || [];
+  const activeDocIds = new Set(activeDocs.map((d) => d.id));
+  const hasCustomDocs = activeDocIds.size > 0;
+
+  // Automatically filter out any corrupted or mojibake cards AND cards belonging to deleted documents
   currentFlashcardsList = (currentFlashcardsList || []).filter(
-    (c) => c && isValidHumanText(c.question) && isValidHumanText(c.answer)
+    (c) =>
+      c &&
+      isValidHumanText(c.question) &&
+      isValidHumanText(c.answer) &&
+      (!hasCustomDocs || !c.document_id || activeDocIds.has(c.document_id))
   );
 
   if (currentFlashcardsList.length === 0) {
-    if (demoStore.flashcards && demoStore.flashcards.length > 0) {
+    const availableChunks = getAvailableChunks(state.currentWorkspaceId);
+    if (availableChunks.length > 0) {
+      container.innerHTML = '<div class="tool-placeholder">Click &ldquo;Generate More Cards&rdquo; to create flashcards from your active materials.</div>';
+      return;
+    } else if (demoStore.flashcards && demoStore.flashcards.length > 0 && (!state.documents || state.documents.length === 0)) {
       currentFlashcardsList = [...demoStore.flashcards];
       currentFlashcardIndex = 0;
     } else {

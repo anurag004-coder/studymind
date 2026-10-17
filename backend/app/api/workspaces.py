@@ -111,13 +111,16 @@ async def delete_workspace(
     storage = get_storage_adapter()
     vector_store = get_vector_store_adapter()
 
-    # 2. Purge files from storage and vectors from Qdrant
+    # 2. Purge files from storage and vectors from Qdrant and lexical BM25
+    from app.ingestion.lexical_index import lexical_index
+
     for doc in docs:
         try:
             await storage.delete_object(doc.storage_key)
         except Exception:
             pass
         await vector_store.delete_by_document(doc.id, current_user.id)
+        lexical_index.delete_by_document(doc.id, current_user.id)
 
     # 3. Invalidate cache
     app_cache.invalidate_workspace(workspace_id)

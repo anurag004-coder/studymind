@@ -88,6 +88,40 @@ class ImagePreprocessor:
         return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
     @classmethod
+    def preprocess_handwriting_image(cls, image_bytes: bytes) -> tuple[bytes, float]:
+        """Specialized preprocessor for handwritten notes, photos, and cursive text.
+
+        Removes lighting gradients, paper shadows, enhances faint pen/pencil ink,
+        and applies adaptive thresholding.
+        """
+        try:
+            img = cls.bytes_to_cv2(image_bytes)
+            deskewed, skew_angle = cls.deskew(img)
+            gray = (
+                cv2.cvtColor(deskewed, cv2.COLOR_BGR2GRAY) if len(deskewed.shape) == 3 else deskewed
+            )
+
+            # 1. Illumination correction & shadow removal via morphological background estimation
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+            dilated = cv2.morphologyEx(gray, cv2.MORPH_DILATE, kernel)
+            bg_diff = cv2.absdiff(gray, dilated)
+            norm = 255 - bg_diff
+
+            # 2. Contrast enhancement tailored for handwriting ink
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            contrast_boost = clahe.apply(norm)
+
+            # 3. Bilateral filter to smooth paper grain while preserving sharp pen strokes
+            filtered = cv2.bilateralFilter(contrast_boost, d=5, sigmaColor=50, sigmaSpace=50)
+
+            output_bytes = cls.cv2_to_bytes(
+                cv2.cvtColor(filtered, cv2.COLOR_GRAY2BGR), format=".png"
+            )
+            return output_bytes, skew_angle
+        except Exception:
+            return cls.preprocess_image(image_bytes)
+
+    @classmethod
     def preprocess_image(cls, image_bytes: bytes) -> tuple[bytes, float]:
         """Runs the complete preprocessing pipeline on image bytes."""
         try:

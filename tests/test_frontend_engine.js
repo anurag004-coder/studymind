@@ -111,12 +111,21 @@ const ctx = vm.createContext(sandbox);
 vm.runInContext(appJsCode, ctx);
 vm.runInContext(`
   window.demoStore = demoStore;
+  window.state = state;
   window.isValidHumanText = isValidHumanText;
   window.generateDynamicFlashcards = generateDynamicFlashcards;
   window.generateDynamicQuiz = generateDynamicQuiz;
   window.generateDynamicSummary = generateDynamicSummary;
   window.extractImageFileClientSide = extractImageFileClientSide;
   window.extractPdfClientSide = extractPdfClientSide;
+  window.removeDocumentFromClientState = removeDocumentFromClientState;
+  window.getAvailableChunks = getAvailableChunks;
+  window.pruneStaleChunksForWorkspace = pruneStaleChunksForWorkspace;
+  window.renderFlashcardCard = renderFlashcardCard;
+  Object.defineProperty(window, 'currentFlashcardsList', {
+    get() { return currentFlashcardsList; },
+    set(v) { currentFlashcardsList = v; }
+  });
 `, ctx);
 
 const win = sandbox.window;
@@ -128,7 +137,7 @@ console.log('Test 1: Testing text validation (isValidHumanText)...');
 assert.strictEqual(win.isValidHumanText('Mitochondria generate adenosine triphosphate through cellular respiration.'), true);
 assert.strictEqual(win.isValidHumanText('Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.'), true);
 assert.strictEqual(win.isValidHumanText('CT # A { e T [ ( R $ ` _ u )'), false, 'Should reject symbol-dense gibberish');
-assert.strictEqual(win.isValidHumanText('R ^ K \\ 3 j7 Ln&'), false, 'Should reject single-character bytecode tokens');
+assert.strictEqual(win.isValidHumanText('{ @ Sloty 42, Uehadoal cartes cailite lant ~Vilts fae ds fungi'), false, 'Must reject hallucinated OCR cursive handwriting pseudo-word garbage');
 assert.strictEqual(win.isValidHumanText('abc'), true);
 assert.strictEqual(win.isValidHumanText('   '), false);
 console.log('Passed Test 1: isValidHumanText correctly filters valid vs corrupted text.');
@@ -242,6 +251,7 @@ win.demoStore.customChunks = {
         }
         return {
           data: {
+            confidence: 88,
             text: `Quantum Physics Midterm Revision Notes
 Schrodinger equation describes how the quantum state of a physical system changes over time.
 Wave function collapse occurs upon measurement according to the Copenhagen interpretation.
@@ -350,8 +360,165 @@ Quantum entanglement links particle quantum states regardless of spatial separat
     console.log(`  Scanned PDF OCR extracted: "${scannedDocResult.chunks[0].text.split('\n')[0]}"`);
     console.log('Passed Test 8: Scanned PDFs automatically fall back to OCR.');
 
+    // Test 9: Document Removal & Replacement Isolation Test
+    console.log('\nTest 9: Testing Document Removal & Replacement Isolation...');
+    const wsIso = 'ws-isolation-test';
+    win.state.currentWorkspaceId = wsIso;
+
+    // Step A: Upload Document A (Biology)
+    const docAId = 'doc-bio-old';
+    const docAFilename = 'mitochondria_biology.pdf';
+    const docAChunks = [
+      {
+        id: 'chunk-a-1',
+        document_id: docAId,
+        filename: docAFilename,
+        page: 1,
+        text: 'Mitochondria are the primary organelles responsible for cellular respiration and energy production in eukaryotic cells. Adenosine triphosphate functions to store and supply chemical energy throughout the cell.',
+        bbox: [0.1, 0.1, 0.9, 0.4]
+      }
+    ];
+
+    win.demoStore.documents = win.demoStore.documents || {};
+    win.demoStore.documents[wsIso] = [
+      { id: docAId, filename: docAFilename, pages: 1, status: 'ready', ocr_quality: 'good' }
+    ];
+    win.demoStore.customChunks = win.demoStore.customChunks || {};
+    win.demoStore.customChunks[wsIso] = [...docAChunks];
+    win.state.documents = [...win.demoStore.documents[wsIso]];
+
+    // Verify Quiz A cites Document A
+    const quizA = await win.generateDynamicQuiz(wsIso, 1);
+    assert.ok(quizA.questions.length >= 1, 'Should generate quiz for Document A');
+    assert.strictEqual(quizA.questions[0].document_id, docAId, 'Quiz A must cite doc-bio-old');
+    assert.ok(quizA.questions[0].stem.includes('mitochondria_biology.pdf'), 'Quiz A stem must cite mitochondria_biology.pdf');
+    console.log(`  Document A Quiz generated: "${quizA.questions[0].stem}"`);
+
+    // Step B: User deletes Document A
+    console.log('  Deleting Document A from client state...');
+    win.removeDocumentFromClientState(docAId);
+
+    // Verify that chunks and documents for Document A are completely purged
+    assert.strictEqual(win.demoStore.documents[wsIso].length, 0, 'Workspace doc list must be empty after deletion');
+    const availableAfterDelete = win.getAvailableChunks(wsIso);
+    assert.strictEqual(availableAfterDelete.length, 0, 'Available chunks must be strictly 0 after deleting Document A');
+    console.log('  Verified: Document A completely purged from customChunks and workspace registry.');
+
+    // Step C: User uploads Document B (Quantum Physics)
+    console.log('  Uploading Document B (Quantum Physics)...');
+    const docBId = 'doc-physics-new';
+    const docBFilename = 'quantum_physics.pdf';
+    const docBChunks = [
+      {
+        id: 'chunk-b-1',
+        document_id: docBId,
+        filename: docBFilename,
+        page: 1,
+        text: 'Schrodinger equation describes how the quantum state of a physical system changes over time. Wave function collapse occurs upon measurement according to the Copenhagen interpretation. Heisenberg uncertainty principle asserts a fundamental limit to the precision of complementary variables. Quantum entanglement links particle quantum states regardless of spatial separation.',
+        bbox: [0.1, 0.1, 0.9, 0.4]
+      }
+    ];
+
+    win.demoStore.documents[wsIso] = [
+      { id: docBId, filename: docBFilename, pages: 1, status: 'ready', ocr_quality: 'good' }
+    ];
+    win.demoStore.customChunks[wsIso] = [...docBChunks];
+    win.state.documents = [...win.demoStore.documents[wsIso]];
+
+    // Step D: Generate Quiz for Document B
+    const quizB = await win.generateDynamicQuiz(wsIso, 2);
+    assert.ok(quizB.questions.length >= 1, 'Should generate quiz for Document B');
+
+    quizB.questions.forEach((q, idx) => {
+      console.log(`  Document B Quiz Q${idx + 1}: ${q.stem}`);
+      console.log(`    Citing: ${q.document_id} (${q.explanation})`);
+
+      // STRICT ISOLATION ASSERTIONS:
+      assert.strictEqual(q.document_id, docBId, `Question must cite doc-physics-new, not previous doc! Got: ${q.document_id}`);
+      assert.ok(!q.stem.includes('mitochondria'), 'Stem must NOT contain any reference to previous document biology concepts');
+      assert.ok(!q.stem.includes(docAFilename), 'Stem must NOT reference old filename');
+      assert.ok(!q.explanation.includes(docAFilename), 'Explanation must NOT reference old filename');
+      assert.ok(!q.quote.toLowerCase().includes('mitochondria'), 'Quote must NOT cite old document content');
+      q.options.forEach((opt) => {
+        assert.ok(!opt.toLowerCase().includes('mitochondria'), 'Distractors must NOT use old document content');
+      });
+    });
+
+    // Step E: Generate Flashcards for Document B
+    const cardsB = await win.generateDynamicFlashcards(wsIso, 2);
+    assert.ok(cardsB.flashcards.length >= 1, 'Should generate flashcards for Document B');
+    cardsB.flashcards.forEach((card) => {
+      assert.strictEqual(card.document_id, docBId, `Flashcard must cite doc-physics-new! Got: ${card.document_id}`);
+      assert.ok(!card.question.toLowerCase().includes('mitochondria'), 'Card question must NOT reference deleted doc');
+      assert.ok(!card.answer.toLowerCase().includes('mitochondria'), 'Card answer must NOT reference deleted doc');
+      assert.ok(!card.quote.toLowerCase().includes('mitochondria'), 'Card quote must NOT reference deleted doc');
+    });
+
+    console.log('Passed Test 9: Document removal & replacement isolation strictly enforced — zero leakage of deleted material.');
+
+    // Test 10: Multi-page Scanned Document OCR Ingestion
+    console.log('\nTest 10: Testing Multi-page Scanned Document OCR Ingestion...');
+    const multiScannedPages = [
+      {
+        getTextContent: async () => ({ items: [] }), // Page 1: scanned
+        getViewport: () => ({ width: 600, height: 850 }),
+        render: () => ({ promise: Promise.resolve() })
+      },
+      {
+        getTextContent: async () => ({ items: [] }), // Page 2: scanned
+        getViewport: () => ({ width: 600, height: 850 }),
+        render: () => ({ promise: Promise.resolve() })
+      }
+    ];
+
+    sandbox.pdfjsLib = {
+      getDocument: () => ({
+        promise: Promise.resolve({
+          numPages: 2,
+          getPage: async (pNo) => multiScannedPages[pNo - 1]
+        })
+      }),
+      GlobalWorkerOptions: {}
+    };
+
+    const multiScannedPdf = {
+      name: 'lecture_handwritten_multipage.pdf',
+      arrayBuffer: async () => new ArrayBuffer(4096)
+    };
+
+    const multiScannedResult = await win.extractPdfClientSide(multiScannedPdf);
+    assert.ok(multiScannedResult, 'Multi-scanned result must exist');
+    assert.strictEqual(multiScannedResult.numPages, 2, 'Should process all 2 scanned pages');
+    assert.ok(multiScannedResult.chunks.length >= 2, `Should generate OCR chunks for each scanned page, got ${multiScannedResult.chunks.length}`);
+    assert.strictEqual(multiScannedResult.ocr_quality, 'good', 'OCR quality should be flagged as good');
+    console.log(`  Multi-page scanned document successfully OCR'd across all pages (${multiScannedResult.chunks.length} chunks generated).`);
+    console.log('Passed Test 10: Multi-page scanned/handwritten documents processed via OCR without page truncation.');
+
+    // Test 11: Flashcard Deck Filtering & Corrupt Card Purging
+    console.log('\nTest 11: Testing Flashcard Deck Filtering & Corrupt Card Purging...');
+    win.currentFlashcardsList = [
+      {
+        question: 'What is established regarding Sloty?',
+        answer: '{ @ Sloty 42, Uehadoal cartes cailite lant ~Vilts fae ds fungi',
+        quote: '{ @ Sloty 42, Uehadoal cartes cailite lant ~Vilts fae ds fungi',
+        document_id: 'doc-old-deleted'
+      },
+      {
+        question: 'What is the primary function of Adenosine triphosphate?',
+        answer: 'Adenosine triphosphate functions to store and supply chemical energy throughout the cell.',
+        quote: 'Adenosine triphosphate functions to store and supply chemical energy throughout the cell.',
+        document_id: 'doc-physics-new'
+      }
+    ];
+
+    win.renderFlashcardCard();
+    assert.strictEqual(win.currentFlashcardsList.length, 1, 'Corrupted card and deleted doc card must be purged');
+    assert.strictEqual(win.currentFlashcardsList[0].document_id, 'doc-physics-new', 'Only active document card may remain');
+    assert.ok(!win.currentFlashcardsList[0].answer.includes('Sloty'), 'Corrupt OCR card must be completely purged from deck');
+    console.log('Passed Test 11: Flashcard deck automatically purges OCR noise and deleted document cards.');
+
     console.log('\n========================================================================');
-    console.log('ALL 8 FRONTEND ENGINE, OCR, PDF SPEED & STUDY TESTS PASSED WITH 100%!');
+    console.log('ALL 11 FRONTEND ENGINE, OCR, PDF SPEED & ISOLATION TESTS PASSED WITH 100%!');
     console.log('========================================================================\n');
   } catch (err) {
     console.error('Test Suite Failed:', err);

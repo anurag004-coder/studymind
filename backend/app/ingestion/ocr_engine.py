@@ -104,8 +104,24 @@ class OCREngine:
         # 2. Local OCR path (Windows Media OCR or Tesseract)
         if not force_vision_ocr:
             win_page = await self._ocr_with_windows_media(preprocessed_bytes, page_no)
-            if win_page:
+            if (
+                win_page
+                and len(win_page.raw_text.strip()) >= 30
+                and win_page.ocr_confidence is not None
+                and win_page.ocr_confidence >= 0.80
+            ):
                 return win_page
+
+            # Try adaptive handwriting preprocessing for notes and faint pencil/ink
+            hw_bytes, _ = ImagePreprocessor.preprocess_handwriting_image(image_bytes)
+            hw_win_page = await self._ocr_with_windows_media(hw_bytes, page_no)
+            if (
+                hw_win_page
+                and len(hw_win_page.raw_text.strip()) >= 30
+                and hw_win_page.ocr_confidence is not None
+                and hw_win_page.ocr_confidence >= 0.80
+            ):
+                return hw_win_page
 
             try:
                 pil_image = Image.open(io.BytesIO(preprocessed_bytes))
@@ -186,16 +202,30 @@ class OCREngine:
                 logger.info(f"Local Tesseract OCR unavailable or failed: {e}. Using Vision-LLM.")
 
         # 3. Vision-LLM Fallback (for handwriting, math formulas, scans without local OCR)
-        vision_result = await self.vision_ocr.transcribe_image(preprocessed_bytes)
-        fallback_blocks = [
-            ExtractedBlock(
-                page_no=page_no,
-                bbox=[50.0, 50.0, 550.0, 750.0],  # Full-page region
-                block_type="paragraph",
-                text=vision_result.text,
-                reading_order=0,
+        hw_bytes, _ = ImagePreprocessor.preprocess_handwriting_image(image_bytes)
+        vision_result = await self.vision_ocr.transcribe_image(hw_bytes or preprocessed_bytes)
+
+        # Split transcribed vision text into paragraph blocks with estimated bounding boxes
+        paragraphs = [p.strip() for p in vision_result.text.split("\n\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in vision_result.text.split("\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [vision_result.text]
+
+        total_p = len(paragraphs)
+        fallback_blocks: list[ExtractedBlock] = []
+        for p_idx, para in enumerate(paragraphs):
+            top_y = 50.0 + (p_idx / max(1, total_p)) * 700.0
+            bottom_y = min(780.0, top_y + (700.0 / max(1, total_p)))
+            fallback_blocks.append(
+                ExtractedBlock(
+                    page_no=page_no,
+                    bbox=[50.0, top_y, 550.0, bottom_y],
+                    block_type="paragraph",
+                    text=para,
+                    reading_order=p_idx,
+                )
             )
-        ]
 
         return ParsedPage(
             page_no=page_no,

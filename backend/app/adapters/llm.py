@@ -3,6 +3,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
+from typing import Any
 
 import httpx
 from pydantic import BaseModel
@@ -111,16 +112,30 @@ class GeminiLLMAdapter(LLMAdapter):
             return LLMResponse(text="[Gemini API key not configured]", model=self.model)
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = "\n\n".join(
-            f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages
-        )
+        parts: list[dict[str, Any]] = []
+        text_prompts: list[str] = []
+        for m in messages:
+            content = m.get("content", "")
+            if content:
+                text_prompts.append(f"{m.get('role', 'user').upper()}: {content}")
+            if "image_base64" in m:
+                parts.append(
+                    {
+                        "inline_data": {
+                            "mime_type": m.get("image_mime", "image/png"),
+                            "data": m["image_base64"],
+                        }
+                    }
+                )
+        if text_prompts:
+            parts.insert(0, {"text": "\n\n".join(text_prompts)})
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
                 resp = await client.post(
                     url,
                     json={
-                        "contents": [{"parts": [{"text": prompt}]}],
+                        "contents": [{"parts": parts}],
                         "generationConfig": {
                             "temperature": temperature,
                         },
@@ -141,7 +156,7 @@ class GeminiLLMAdapter(LLMAdapter):
 
     async def generate_structured(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         response_model: type[BaseModel],
         temperature: float = 0.0,
     ) -> tuple[BaseModel, LLMResponse]:
@@ -158,16 +173,30 @@ class GeminiLLMAdapter(LLMAdapter):
             return instance, raw
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = "\n\n".join(
-            f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages
-        )
+        parts: list[dict[str, Any]] = []
+        text_prompts: list[str] = []
+        for m in messages:
+            content = m.get("content", "")
+            if content:
+                text_prompts.append(f"{m.get('role', 'user').upper()}: {content}")
+            if "image_base64" in m:
+                parts.append(
+                    {
+                        "inline_data": {
+                            "mime_type": m.get("image_mime", "image/png"),
+                            "data": m["image_base64"],
+                        }
+                    }
+                )
+        if text_prompts:
+            parts.insert(0, {"text": "\n\n".join(text_prompts)})
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
                 resp = await client.post(
                     url,
                     json={
-                        "contents": [{"parts": [{"text": prompt}]}],
+                        "contents": [{"parts": parts}],
                         "generationConfig": {
                             "temperature": temperature,
                             "responseMimeType": "application/json",

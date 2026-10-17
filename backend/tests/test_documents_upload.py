@@ -2,6 +2,7 @@
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def get_auth_token_and_workspace(
@@ -107,3 +108,92 @@ async def test_upload_empty_file(client: AsyncClient) -> None:
     )
     assert resp.status_code == 400
     assert "empty" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_delete_document_purges_lexical_index_and_study_items(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    import json
+
+    from sqlalchemy import select
+
+    from app.db.models import Chunk, StudyItem
+    from app.ingestion.lexical_index import lexical_index
+
+    token, ws_id = await get_auth_token_and_workspace(client, "purge_test_user@test.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Upload document
+    pdf_content = b"%PDF-1.4 dummy textbook file content"
+    files = {"file": ("purge_subject.pdf", pdf_content, "application/pdf")}
+    upload_resp = await client.post(
+        f"/api/v1/workspaces/{ws_id}/documents",
+        files=files,
+        headers=headers,
+    )
+    assert upload_resp.status_code == 202
+    doc_id = upload_resp.json()["document_id"]
+
+    # Get user_id from token/profile
+    me_resp = await client.get("/api/v1/auth/me", headers=headers)
+    user_id = me_resp.json()["id"]
+
+    # Index test chunk into BM25 index
+    chunk_id = f"chunk-{doc_id}-1"
+    lexical_index.index_chunks(
+        [
+            {
+                "chunk_id": chunk_id,
+                "document_id": doc_id,
+                "workspace_id": ws_id,
+                "user_id": user_id,
+                "text": "UniqueMitochondriaATPConceptForPurgeTest",
+            }
+        ]
+    )
+
+    # Verify BM25 finds it before deletion
+    results_before = lexical_index.search(
+        "UniqueMitochondriaATPConceptForPurgeTest", user_id=user_id, workspace_id=ws_id
+    )
+    assert len(results_before) > 0
+    assert results_before[0].chunk_id == chunk_id
+
+    # Create a Chunk and StudyItem referencing this doc in the test session
+    chunk = Chunk(
+        id=chunk_id,
+        document_id=doc_id,
+        page_start=1,
+        page_end=1,
+        chunk_index=0,
+        text="UniqueMitochondriaATPConceptForPurgeTest",
+        token_count=10,
+        embedding_model="text-embedding-3-small",
+    )
+    db_session.add(chunk)
+    study_item = StudyItem(
+        workspace_id=ws_id,
+        type="flashcard",
+        payload_json=json.dumps(
+            {"front": "What is ATP?", "back": "Energy carrier", "document_id": doc_id}
+        ),
+        source_chunk_ids=json.dumps([chunk_id]),
+    )
+    db_session.add(study_item)
+    await db_session.commit()
+
+    # Delete the document via API
+    del_resp = await client.delete(f"/api/v1/documents/{doc_id}", headers=headers)
+    assert del_resp.status_code == 204
+
+    # Verify lexical index purged chunks for this document
+    results_after = lexical_index.search(
+        "UniqueMitochondriaATPConceptForPurgeTest", user_id=user_id, workspace_id=ws_id
+    )
+    assert len(results_after) == 0
+
+    # Verify StudyItem referencing this document was purged
+    res = await db_session.execute(select(StudyItem).where(StudyItem.workspace_id == ws_id))
+    items = res.scalars().all()
+    assert len(items) == 0
