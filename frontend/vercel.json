@@ -1,12 +1,13 @@
 {
   "version": 2,
-  "public": true,
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/static/index.css", "destination": "/index.css" },
-    { "source": "/static/app.js", "destination": "/app.js" },
-    { "source": "/static/:match*", "destination": "/:match*" },
-    { "source": "/app", "destination": "/index.html" },
-    { "source": "/", "destination": "/index.html" }
+  "builds": [
+    { "src": "*", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/static/index.css", "dest": "/index.css" },
+    { "src": "/static/app.js", "dest": "/app.js" },
+    { "src": "/app", "dest": "/index.html" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

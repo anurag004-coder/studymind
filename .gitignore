@@ -89,7 +89,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Node
+# Node & Deployments
 node_modules/
 .next/
 out/
+.vercel/

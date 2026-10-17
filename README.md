@@ -144,17 +144,19 @@ This starts the FastAPI backend, Qdrant vector database, PostgreSQL, Redis, and 
 
 ---
 
-## Frontend Deployment (Vercel)
+## Live Frontend (Vercel)
 
-The frontend is a lightweight, zero-build client that can be deployed to Vercel:
+The frontend is deployed live on Vercel at:
+https://frontend-mu-seven-gmmp4fw1jh.vercel.app
 
-1. Deploy the `frontend/` directory using the Vercel CLI:
-   ```bash
-   npx vercel deploy ./frontend
-   ```
-2. When deployed separately from the backend, configure the backend API endpoint by either:
-   - Appending `?api=https://your-backend-url.com` to the URL.
-   - Setting `localStorage.setItem('studymind_api_base', 'https://your-backend-url.com')` in the browser console.
+To connect the live frontend to your backend API server:
+- Append `?api=https://your-backend-url.com` to the URL.
+- Or set `localStorage.setItem('studymind_api_base', 'https://your-backend-url.com')` in your browser's developer console.
+
+To deploy your own instance of the frontend to Vercel:
+```bash
+npx vercel deploy ./frontend --prod
+```
 
 ---
 

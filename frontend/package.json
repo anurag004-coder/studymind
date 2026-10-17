@@ -4,7 +4,6 @@
   "private": true,
   "description": "StudyMind Frontend Application with Grounded Chat and Source Viewer",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js"
+    "dev": "node server.js"
   }
 }
