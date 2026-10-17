@@ -122,9 +122,28 @@ vm.runInContext(`
   window.getAvailableChunks = getAvailableChunks;
   window.pruneStaleChunksForWorkspace = pruneStaleChunksForWorkspace;
   window.renderFlashcardCard = renderFlashcardCard;
+  window.handleMockApiRequest = handleMockApiRequest;
+  window.apiRequest = apiRequest;
+  window.renderExamReport = renderExamReport;
   Object.defineProperty(window, 'currentFlashcardsList', {
     get() { return currentFlashcardsList; },
     set(v) { currentFlashcardsList = v; }
+  });
+  Object.defineProperty(window, 'currentExamQuestions', {
+    get() { return currentExamQuestions; },
+    set(v) { currentExamQuestions = v; }
+  });
+  Object.defineProperty(window, 'currentExamSession', {
+    get() { return currentExamSession; },
+    set(v) { currentExamSession = v; }
+  });
+  Object.defineProperty(window, 'examUserAnswers', {
+    get() { return examUserAnswers; },
+    set(v) { examUserAnswers = v; }
+  });
+  Object.defineProperty(window, 'examSecondsRemaining', {
+    get() { return examSecondsRemaining; },
+    set(v) { examSecondsRemaining = v; }
   });
 `, ctx);
 
@@ -517,8 +536,48 @@ Quantum entanglement links particle quantum states regardless of spatial separat
     assert.ok(!win.currentFlashcardsList[0].answer.includes('Sloty'), 'Corrupt OCR card must be completely purged from deck');
     console.log('Passed Test 11: Flashcard deck automatically purges OCR noise and deleted document cards.');
 
+    // Test 12: Exam Session Submission & NaN Prevention
+    console.log('\nTest 12: Testing Exam Submission Grading & Metric Integrity...');
+    win.currentExamSession = 'sess-test-exam-12';
+    win.currentExamQuestions = [
+      {
+        id: 'q-test-1',
+        stem: 'What is packet switching?',
+        options: ['Packet switching breaks data into packets', 'Circuit switching', 'Pure analogue', 'None'],
+        correct_answer_index: 0,
+        marks: 1,
+        quote: 'Packet switching breaks data into packets'
+      },
+      {
+        id: 'q-test-2',
+        stem: 'What is the primary function of DNS?',
+        options: ['Converts hostnames to IP addresses', 'Stores electricity', 'Encrypts disk', 'None'],
+        correct_answer_index: 0,
+        marks: 1,
+        quote: 'Converts hostnames to IP addresses'
+      }
+    ];
+    win.examUserAnswers = { 'q-test-1': 0, 'q-test-2': 1 };
+    win.examSecondsRemaining = 540;
+
+    const examReport = await win.handleMockApiRequest(`/quizzes/${win.currentExamSession}/submit`, { method: 'POST' });
+    assert.ok(examReport, 'Exam report must exist');
+    assert.strictEqual(typeof examReport.percentage, 'number', 'Percentage must be a valid number');
+    assert.ok(!isNaN(examReport.percentage), 'Percentage must NOT be NaN');
+    assert.strictEqual(examReport.percentage, 50, 'Score should be 50% (1/2 correct)');
+    assert.strictEqual(examReport.score, 1, 'Score must be 1 mark');
+    assert.strictEqual(examReport.max_score, 2, 'Max score must be 2 marks');
+    assert.ok(!isNaN(examReport.duration_s), 'Duration must be a valid number');
+    assert.strictEqual(examReport.questions.length, 2, 'Must review both questions');
+    assert.strictEqual(examReport.questions[0].is_correct, true, 'Q1 must be recorded as correct');
+    assert.strictEqual(examReport.questions[1].is_correct, false, 'Q2 must be recorded as incorrect');
+    assert.ok(examReport.questions[0].correct_answer, 'Correct answer text must be populated');
+    assert.ok(examReport.questions[0].user_answer, 'User answer text must be populated');
+    console.log(`  Exam Result: ${examReport.percentage}% (${examReport.score}/${examReport.max_score} Marks) Duration: ${examReport.duration_s}s`);
+    console.log('Passed Test 12: Exam report calculates deterministic scores, metrics & question reviews without NaN.');
+
     console.log('\n========================================================================');
-    console.log('ALL 11 FRONTEND ENGINE, OCR, PDF SPEED & ISOLATION TESTS PASSED WITH 100%!');
+    console.log('ALL 12 FRONTEND ENGINE, OCR, PDF SPEED & ISOLATION TESTS PASSED WITH 100%!');
     console.log('========================================================================\n');
   } catch (err) {
     console.error('Test Suite Failed:', err);

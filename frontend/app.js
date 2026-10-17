@@ -29,6 +29,13 @@ const state = {
   isDemoMode: false,
 };
 
+let currentExamSession = null;
+let currentExamQuestions = [];
+let currentExamIndex = 0;
+let examTimerInterval = null;
+let examSecondsRemaining = 0;
+let examUserAnswers = {};
+
 // ============================================================================
 // Standalone Demo Store & Dynamic Study Engine (Client-Side & Vercel Offline)
 // ============================================================================
@@ -692,7 +699,7 @@ function preprocessCanvasForHandwriting(canvas) {
 async function performImageOcr(imageSource, label = 'Study Note Image') {
   // 1. Ensure image is on an optimized canvas (max 1600px dimension)
   let canvas = null;
-  if (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement) {
+  if (imageSource && (typeof imageSource.getContext === 'function' || (typeof HTMLCanvasElement !== 'undefined' && imageSource instanceof HTMLCanvasElement))) {
     canvas = imageSource;
   } else if (typeof imageSource === 'string') {
     canvas = await new Promise((res, rej) => {
@@ -826,9 +833,8 @@ async function performImageOcr(imageSource, label = 'Study Note Image') {
     }
   }
 
-  // 4. Grounded study material representation for visual & handwritten notes
-  const cleanLabel = (label || 'Handwritten Notes').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-  return `Handwritten Study Notes: ${cleanLabel}\nVisual study notes and handwritten material from ${cleanLabel}.\nReview handwritten equations, annotations, and diagrams in the synchronized source viewer.\nTip: Provide a free Gemini API key in Settings (⚙️) for instant AI handwriting transcription.`;
+  // 4. If OCR failed or produced no valid text, return empty string so caller knows no text was extracted
+  return '';
 }
 
 async function extractPdfClientSide(file) {
@@ -940,7 +946,7 @@ async function extractPdfClientSide(file) {
 
           try {
             const page = await pdf.getPage(pageNo);
-            const viewport = page.getViewport({ scale: 1.2 });
+            const viewport = page.getViewport({ scale: 2.0 });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
@@ -979,17 +985,16 @@ async function extractPdfClientSide(file) {
         return { docId, numPages, pages, chunks: allChunks, ocr_quality: 'good' };
       }
 
-      // Fallback clean chunks if completely blank document
-      const fallbackClean = `Document Notes: ${file.name}\nExtracted visual reference document from ${file.name}.\nBrowse pages in the source viewer.`;
-      const fallbackChunk = {
-        id: `chunk-fallback-${Date.now()}`,
-        page: 1,
-        text: fallbackClean,
-        bbox: [0.06, 0.12, 0.94, 0.88],
-        bounding_box: [0.06, 0.12, 0.94, 0.88],
+      // No text could be extracted from pages (handwritten or pure images without OCR key)
+      return {
+        docId,
+        numPages,
+        pages,
+        chunks: [],
+        has_untranscribed_handwriting: true,
+        filename: file.name,
+        ocr_quality: 'handwriting_detected',
       };
-      pages[0].text = fallbackClean;
-      return { docId, numPages, pages, chunks: [fallbackChunk], ocr_quality: 'good' };
     } catch (pdfErr) {
       console.warn('PDF.js extraction failed:', pdfErr);
       return { numPages: 1, pages: [], chunks: [], error: pdfErr.message };
@@ -1058,7 +1063,22 @@ async function extractImageFileClientSide(file) {
       }
 
       if (!ocrText || !isValidHumanText(ocrText)) {
-        ocrText = `Visual Lecture Material: ${cleanName}\nKey visual diagram and study concepts regarding ${cleanName}.\nReview this note in the source viewer for detailed diagrams.`;
+        return resolve({
+          numPages: 1,
+          pages: [
+            {
+              pageNo: 1,
+              image: imgDataUrl,
+              text: '',
+              lines: [],
+              width: 800,
+              height: 1000,
+            },
+          ],
+          chunks: [],
+          has_untranscribed_handwriting: true,
+          ocr_quality: 'handwriting_detected',
+        });
       }
 
       const rawLines = ocrText
@@ -1667,9 +1687,15 @@ ${combinedNotes}`;
 
     // C. Concept Inquiry Fallback
     if (!q) {
-      const words = clean.split(/\s+/);
+      const strippedClean = clean.replace(/^(\d+[\.\)]\s*|[a-z][\.\)]\s*|•\s*|-\s*)+/i, '').trim();
+      const words = strippedClean.split(/\s+/);
       const cleanWords = words.map((w) => w.replace(/[,;:.()]/g, ''));
-      const keyConcept = cleanWords.slice(0, Math.min(5, cleanWords.length)).join(' ');
+      let keyConcept = cleanWords
+        .slice(0, Math.min(5, cleanWords.length))
+        .join(' ')
+        .replace(/\b(and|or|the|a|an|of|in|to|for|with|on|at|by|from|as|is|are)\b\s*$/i, '')
+        .trim();
+      if (!keyConcept) keyConcept = 'this concept';
       q = `According to your study material, what is established regarding "${keyConcept}"?`;
       a = clean;
     }
@@ -1828,8 +1854,15 @@ ${combinedNotes}`;
     const factText = target.statement;
     if (!factText || !isValidHumanText(factText) || factText.length < 25) continue;
 
-    const words = factText.split(/\s+/);
-    const keyConcept = words.slice(0, Math.min(5, words.length)).join(' ').replace(/[,;:.()]/g, '');
+    const strippedFact = factText.replace(/^(\d+[\.\)]\s*|[a-z][\.\)]\s*|•\s*|-\s*)+/i, '').trim();
+    const words = strippedFact.split(/\s+/);
+    let keyConcept = words
+      .slice(0, Math.min(5, words.length))
+      .join(' ')
+      .replace(/[,;:.()]/g, '')
+      .replace(/\b(and|or|the|a|an|of|in|to|for|with|on|at|by|from|as|is|are)\b\s*$/i, '')
+      .trim();
+    if (!keyConcept) keyConcept = 'this key topic';
 
     // Question stem (clean raw text, NO pre-escapeHtml!)
     let stem = '';
@@ -1874,6 +1907,7 @@ ${combinedNotes}`;
       stem,
       options: optionObjs.map((o) => o.val),
       correct_answer_index: correctIdx,
+      correct_answer: optionObjs[correctIdx].val,
       quote: factText.slice(0, 140),
       explanation: `Verified directly from ${target.filename} on Page ${target.page}.`,
       document_id: target.document_id,
@@ -2174,16 +2208,107 @@ async function handleMockApiRequest(endpoint, options = {}) {
     return { items: (fcData.flashcards || []).map((f, idx) => ({ id: 'item-' + idx, type: 'flashcard', payload: f })) };
   }
 
-  // 7. Quiz & Practice
+  // 7. Quiz & Practice Submissions & Answers
+  if (cleanEp.includes('/submit')) {
+    const qList = (currentExamQuestions && currentExamQuestions.length > 0)
+      ? currentExamQuestions
+      : (demoStore.quizQuestions || []);
+
+    let earnedScore = 0;
+    let totalMarks = 0;
+
+    const reviewedQuestions = qList.map((q) => {
+      const marks = q.marks || 1;
+      totalMarks += marks;
+      const userAns = examUserAnswers ? examUserAnswers[q.id] : undefined;
+      const correctIdx = typeof q.correct_answer_index === 'number' ? q.correct_answer_index : 0;
+      let isCorrect = false;
+
+      let userAnsText = 'None';
+      if (typeof userAns === 'number' && q.options && q.options[userAns]) {
+        userAnsText = q.options[userAns];
+        isCorrect = userAns === correctIdx;
+      } else if (typeof userAns === 'string' && userAns.trim()) {
+        userAnsText = userAns.trim();
+        const correctText = q.options && q.options[correctIdx] ? q.options[correctIdx] : (q.correct_answer || '');
+        isCorrect = userAnsText.toLowerCase() === correctText.toLowerCase();
+      }
+
+      if (isCorrect) earnedScore += marks;
+
+      const correctAnsText = q.options && q.options[correctIdx]
+        ? q.options[correctIdx]
+        : (q.correct_answer || 'Correct Answer');
+
+      return {
+        id: q.id,
+        stem: q.stem,
+        marks,
+        score: isCorrect ? marks : 0,
+        is_correct: isCorrect,
+        user_answer: userAnsText,
+        correct_answer: correctAnsText,
+        explanation: q.explanation || 'Verified directly from your course notes.',
+        source_quotes: q.quote ? [q.quote] : (q.source_quotes || []),
+      };
+    });
+
+    const percentage = totalMarks > 0 ? Math.round((earnedScore / totalMarks) * 100) : 0;
+    const passed = percentage >= 60;
+    const duration = (typeof examSecondsRemaining === 'number' && examSecondsRemaining > 0)
+      ? Math.max(15, 600 - examSecondsRemaining)
+      : 45;
+
+    return {
+      session_id: currentExamSession || ('sess-' + Date.now()),
+      score: earnedScore,
+      max_score: totalMarks,
+      percentage,
+      passed,
+      duration_s: duration,
+      encouraging_feedback: passed
+        ? 'Great job! You demonstrated strong recall and mastery of your uploaded course notes.'
+        : 'Revision recommended. Review the cited course excerpts below to strengthen your understanding.',
+      per_topic: [
+        {
+          topic_name: 'Course Content Recall',
+          percentage,
+        },
+      ],
+      questions: reviewedQuestions,
+    };
+  }
+
+  if (cleanEp.includes('/answers')) {
+    const body = options.body ? JSON.parse(options.body) : {};
+    const qId = body.question_id;
+    const userAns = body.user_answer;
+    const q = currentExamQuestions
+      ? currentExamQuestions.find((x) => x && x.id === qId)
+      : null;
+
+    let isCorr = false;
+    if (q) {
+      if (typeof userAns === 'number') {
+        isCorr = userAns === q.correct_answer_index;
+      } else if (typeof userAns === 'string') {
+        const correctText = q.options ? q.options[q.correct_answer_index] : '';
+        isCorr = userAns.trim().toLowerCase() === correctText.trim().toLowerCase();
+      }
+    }
+    return {
+      status: 'recorded',
+      is_correct: isCorr,
+      score: isCorr ? (q?.marks || 1) : 0,
+      max_score: q?.marks || 1,
+      explanation: q?.explanation || 'Verified directly against course materials.',
+      source_quotes: q?.quote ? [q.quote] : [],
+    };
+  }
+
   if (cleanEp.includes('/study/quiz') || cleanEp.includes('/quizzes')) {
     const body = options.body ? JSON.parse(options.body) : {};
     return await generateDynamicQuiz(activeWsId, body.count || 3, body.difficulty || 'medium');
-  }
-  if (cleanEp.includes('/answers')) {
-    return { status: 'recorded', correct: true, feedback: 'Correct! Verified against course notes.' };
-  }
-  if (cleanEp.includes('/submit')) {
-    return { score: 2, total_marks: 2, percentage: 100, topic_breakdown: { 'Course Mastery': 100 } };
   }
   if (cleanEp.includes('/feedback') || cleanEp.includes('/report')) {
     return { status: 'recorded', message: 'Feedback saved' };
@@ -2605,8 +2730,48 @@ async function handleMultipleFiles(files) {
       const pages = parsedDoc ? parsedDoc.pages : [];
 
       if (chunks.length === 0) {
-        showToast(`No readable text could be extracted from "${file.name}". Please upload a notes document with selectable text.`, 'warning');
-        return;
+        if (!demoStore.customDocs) demoStore.customDocs = {};
+        demoStore.customDocs[docId] = {
+          id: docId,
+          filename: file.name,
+          page_count: numPages,
+          pages,
+          chunks: [],
+          has_untranscribed_handwriting: true,
+        };
+
+        if (!demoStore.customPageImages) demoStore.customPageImages = {};
+        demoStore.customPageImages[docId] = {};
+        pages.forEach((p) => {
+          demoStore.customPageImages[docId][p.pageNo] = p.image;
+        });
+
+        const docRecord = {
+          id: docId,
+          filename: file.name,
+          pages: numPages,
+          page_count: numPages,
+          status: 'handwriting_detected',
+          ocr_quality: 'needs_key',
+          chunk_count: 0,
+          has_untranscribed_handwriting: true,
+          created_at: new Date().toISOString(),
+        };
+
+        if (!demoStore.documents[state.currentWorkspaceId]) {
+          demoStore.documents[state.currentWorkspaceId] = [];
+        }
+        demoStore.documents[state.currentWorkspaceId].unshift(docRecord);
+        saveDemoStoreToStorage();
+
+        showToast(
+          `Handwritten notes detected in "${file.name}". Enter a free Gemini key in Settings (⚙️) to transcribe, or click 📝 in Course Library to add text notes.`,
+          'warning'
+        );
+        successCount++;
+        lastDocId = docId;
+        lastPages = numPages;
+        continue;
       }
 
       // Store in memory stores
@@ -4546,7 +4711,26 @@ function renderFlashcardCard() {
     if (availableChunks.length > 0) {
       container.innerHTML = '<div class="tool-placeholder">Click &ldquo;Generate More Cards&rdquo; to create flashcards from your active materials.</div>';
       return;
-    } else if (demoStore.flashcards && demoStore.flashcards.length > 0 && (!state.documents || state.documents.length === 0)) {
+    }
+
+    const hasHandwritingDoc = activeDocs.some((d) => d && (d.has_untranscribed_handwriting || d.status === 'handwriting_detected'));
+    if (hasHandwritingDoc) {
+      container.innerHTML = `
+        <div class="tool-placeholder" style="text-align:left; max-width:540px; margin:0 auto; padding:20px; line-height:1.6;">
+          <h4 style="margin:0 0 8px; color:var(--primary); font-size:1.05rem;">✍️ Handwritten Notes Detected</h4>
+          <p style="margin:0 0 10px; font-size:0.88rem; color:var(--text-secondary);">
+            StudyMind detected handwritten pages in your uploaded notes. Browser offline OCR cannot decipher cursive handwriting without AI transcription.
+          </p>
+          <div style="background:rgba(217,119,87,0.1); border-left:3px solid var(--primary); padding:10px 14px; border-radius:var(--radius-sm); font-size:0.84rem; margin-bottom:14px;">
+            <strong>How to study these notes:</strong> Enter a free Gemini API key in <strong>Settings (⚙️)</strong> in the top bar for instant AI handwriting transcription, or upload digital lecture slides.
+          </div>
+          <button class="btn-primary-sm" onclick="document.getElementById('server-modal')?.classList.remove('hidden')">Open Settings (⚙️) to Add Free Gemini Key</button>
+        </div>
+      `;
+      return;
+    }
+
+    if (demoStore.flashcards && demoStore.flashcards.length > 0 && (!state.documents || state.documents.length === 0)) {
       currentFlashcardsList = [...demoStore.flashcards];
       currentFlashcardIndex = 0;
     } else {
@@ -4755,12 +4939,6 @@ function openFeedbackModal(messageId) {
 // Phase 7B: Test Me / Exam Prep Engine Logic
 // ============================================================================
 
-let currentExamSession = null;
-let currentExamQuestions = [];
-let currentExamIndex = 0;
-let examTimerInterval = null;
-let examSecondsRemaining = 0;
-let examUserAnswers = {};
 
 function initExamPrepEngine() {
   const btnStart = document.getElementById('btn-start-exam');
@@ -5038,7 +5216,15 @@ function renderExamReport(report) {
   const container = document.getElementById('exam-results-card');
   if (!container) return;
 
-  const passed = report.passed;
+  const pct = typeof report.percentage === 'number' && !isNaN(report.percentage) ? Math.round(report.percentage) : 0;
+  const score = report.score ?? 0;
+  const maxScore = report.max_score ?? Math.max(1, (report.questions || []).length);
+  const durS = typeof report.duration_s === 'number' && !isNaN(report.duration_s) ? report.duration_s : 0;
+  const durM = Math.floor(durS / 60);
+  const durSec = durS % 60;
+  const passed = report.passed ?? (pct >= 60);
+  const feedback = report.encouraging_feedback || (passed ? 'Great job mastering these concepts!' : 'Review the cited reference notes below.');
+
   const topicsHtml = (report.per_topic || [])
     .map(
       (t) => `
@@ -5060,13 +5246,13 @@ function renderExamReport(report) {
       <div style="display:flex; justify-content:space-between;">
         <strong>Q${idx + 1}: ${escapeHtml(q.stem)}</strong>
         <span class="${q.is_correct ? 'stage-badge' : 'stage-badge'}" style="${q.is_correct ? 'color:var(--emerald); background:rgba(16,185,129,0.15);' : 'color:var(--rose); background:rgba(244,63,94,0.15);'}">
-          ${q.score} / ${q.marks} Marks
+          ${q.score ?? (q.is_correct ? 1 : 0)} / ${q.marks ?? 1} Marks
         </span>
       </div>
       <div style="margin-top:8px; font-size:0.86rem;">
         <div><strong>Your Answer:</strong> ${escapeHtml(String(q.user_answer ?? 'None'))}</div>
-        <div><strong>Correct Key:</strong> ${escapeHtml(String(q.correct_answer))}</div>
-        <div style="color:var(--text-muted); margin-top:4px;">${escapeHtml(q.explanation)}</div>
+        <div><strong>Correct Key:</strong> ${escapeHtml(String(q.correct_answer ?? 'See explanation below'))}</div>
+        <div style="color:var(--text-muted); margin-top:4px;">${escapeHtml(q.explanation || 'Verified directly against course materials.')}</div>
         ${
           q.source_quotes && q.source_quotes[0]
             ? `<div style="font-size:0.78rem; color:var(--text-muted); font-style:italic; margin-top:4px;">
@@ -5083,21 +5269,21 @@ function renderExamReport(report) {
   container.innerHTML = `
     <div class="report-hero">
       <div class="report-score-box">
-        <div class="score-big">${Math.round(report.percentage)}%</div>
-        <div class="score-sub">${report.score} of ${report.max_score} Total Marks</div>
+        <div class="score-big">${pct}%</div>
+        <div class="score-sub">${score} of ${maxScore} Total Marks</div>
       </div>
       <div style="text-align:right;">
         <span class="stage-badge" style="${passed ? 'color:var(--emerald); background:var(--emerald-bg);' : 'color:var(--rose); background:var(--rose-bg);'} font-size:0.85rem; padding:4px 12px;">
           ${passed ? '✓ PASSED' : 'REVISION RECOMMENDED'}
         </span>
         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">
-          Duration: ${Math.floor(report.duration_s / 60)}m ${report.duration_s % 60}s
+          Duration: ${durM}m ${durSec}s
         </div>
       </div>
     </div>
 
     <div style="font-size:0.92rem; line-height:1.5; background:rgba(217,119,87,0.08); border-left:3px solid var(--primary); padding:10px 14px; border-radius:var(--radius-sm);">
-      💡 <strong>AI Feedback:</strong> ${escapeHtml(report.encouraging_feedback)}
+      💡 <strong>AI Feedback:</strong> ${escapeHtml(feedback)}
     </div>
 
     <div class="report-topics-breakdown">
@@ -5106,8 +5292,8 @@ function renderExamReport(report) {
     </div>
 
     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
-      <button class="btn-primary-sm" onclick="exportExamSession('${report.session_id}', 'anki')">Export to Anki TSV ↗</button>
-      <button class="btn-ghost-sm" onclick="exportExamSession('${report.session_id}', 'markdown')">Download Exam Guide (.md) ↗</button>
+      <button class="btn-primary-sm" onclick="exportExamSession('${report.session_id || ''}', 'anki')">Export to Anki TSV ↗</button>
+      <button class="btn-ghost-sm" onclick="exportExamSession('${report.session_id || ''}', 'markdown')">Download Exam Guide (.md) ↗</button>
       <button class="btn-ghost-sm" onclick="document.getElementById('exam-active-runner').classList.add('hidden'); document.getElementById('exam-results-card').classList.add('hidden');" style="margin-left:auto;">Back to Setup</button>
     </div>
 
