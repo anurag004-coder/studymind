@@ -1,0 +1,2 @@
+Rewrite the final user question into a standalone search query using the chat history to resolve pronouns.
+Do not add facts. If the question has multiple parts, output up to 3 sub-queries. Return JSON: {"queries": ["..."]}

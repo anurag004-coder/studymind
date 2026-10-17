@@ -1,0 +1,63 @@
+name: StudyMind Nightly Evaluation & Benchmark
+
+on:
+  schedule:
+    # Run every night at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  evaluation-harness:
+    runs-on: ubuntu-latest
+    name: Run Grounding, Retrieval, and Anti-Hallucination Eval Suite
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt || pip install pytest pytest-asyncio httpx rapidfuzz pydantic pydantic-settings sqlalchemy aiosqlite rank_bm25 passlib[bcrypt] python-jose Pillow
+
+      - name: Run Phase 4 Retrieval Eval (Recall@k, MRR, Relevance Gate)
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          JWT_SECRET: nightly-eval-secret-test-key-32chars
+          LLM_PROVIDER: mock
+          EMBEDDING_PROVIDER: mock
+        run: |
+          python -m pytest backend/tests/test_retrieval.py -k "test_phase4_retrieval_dod_evaluation_benchmark" -v
+
+      - name: Run Phase 5 Generation & 5-Layer Anti-Hallucination Eval
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          JWT_SECRET: nightly-eval-secret-test-key-32chars
+          LLM_PROVIDER: mock
+          EMBEDDING_PROVIDER: mock
+        run: |
+          python -m pytest backend/tests/test_generation.py -k "test_phase5_generation_and_verification_dod_benchmark" -v
+
+      - name: Run Phase 7 & 7B Quiz Engine Grounding & Evaluation
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          JWT_SECRET: nightly-eval-secret-test-key-32chars
+          LLM_PROVIDER: mock
+          EMBEDDING_PROVIDER: mock
+        run: |
+          python -m pytest backend/tests/test_phase7b_quiz_engine.py -v
+
+      - name: Run Phase 8 Hardening & Verification Suite
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          JWT_SECRET: nightly-eval-secret-test-key-32chars
+          LLM_PROVIDER: mock
+          EMBEDDING_PROVIDER: mock
+        run: |
+          python scripts/verify_phase8.py

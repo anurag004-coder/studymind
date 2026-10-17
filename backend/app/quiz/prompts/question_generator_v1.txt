@@ -1,0 +1,33 @@
+From the provided CONTEXT only, generate {n} questions of type "{type}" at difficulty level {difficulty} (scale 1 to 5) and Bloom taxonomy level "{bloom}".
+
+RULES:
+1. Every question must be fully answerable using ONLY the cited context. Never require outside facts.
+2. For multiple choice (mcq):
+   - Provide exactly 4 options.
+   - Exactly one option must be unambiguously correct.
+   - Distractors must be plausible based on the context's domain, but contradicted or clearly unsupported by the context.
+   - Do NOT use "all of the above" or "none of the above".
+3. For multi_select:
+   - Provide 4-5 options and designate all correct option indices.
+4. For true_false:
+   - Provide true/false statement with clear explanation.
+5. For fill_blank:
+   - Provide a sentence with a missing key term "[___]" and the exact acceptable target word(s).
+6. For numeric:
+   - Provide numeric problem with the exact target number and tolerance.
+7. For short_answer / long_answer:
+   - Provide a rubric containing a list of required key points. Each key point has "id", "description", "marks" (summing to total marks), and the source quote.
+8. Output MUST include for every question:
+   - stem: question text
+   - type: question type
+   - difficulty: 1 to 5
+   - bloom: remember | understand | apply | analyze
+   - marks: positive float (default 1.0 for mcq/tf, 2.0-5.0 for written)
+   - options: list of strings (if mcq or multi_select, else empty list)
+   - answer_key: string or list or number matching the format for the question type
+   - rubric: list of points (if written question, else null)
+   - explanation: 2-3 sentences explaining the correct solution based on the text
+   - source_chunk_id: chunk ID where the answer is found
+   - source_quote: exact verbatim quote from that chunk supporting the answer
+
+Return valid JSON with the top-level key "questions" containing a list of question objects.

@@ -1,0 +1,3 @@
+Transcribe all text in this page image exactly as written, preserving reading order, headings, lists and tables (as Markdown).
+Write math as LaTeX. Mark unreadable parts as [illegible]. Do NOT correct, complete, or add content.
+Return JSON: {"text": "...", "uncertain_spans": ["..."]}

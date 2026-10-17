@@ -1,0 +1,301 @@
+{
+  "timestamp": "2026-10-10T16:56:45.599232+00:00",
+  "summary": {
+    "total_gold_queries": 20,
+    "total_unanswerable_queries": 10,
+    "recall_at_6": 1.0,
+    "recall_at_30": 1.0,
+    "page_hit_rate_at_6": 1.0,
+    "mrr": 0.8517,
+    "abstention_precision": 1.0,
+    "false_abstain_rate": 0.1,
+    "latency_p50_ms": 3.67,
+    "latency_p95_ms": 11.4,
+    "recall_target_met": true,
+    "abstention_target_met": true
+  },
+  "per_query_results": [
+    {
+      "id": "g1",
+      "question": "What is photosynthesis and where does it occur?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 0.5,
+      "best_score": 0.475,
+      "abstained": false,
+      "latency_ms": 4.78
+    },
+    {
+      "id": "g2",
+      "question": "What is the primary function of the thylakoid membrane?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.9,
+      "abstained": false,
+      "latency_ms": 3.69
+    },
+    {
+      "id": "g3",
+      "question": "What is the chemical formula for cellular respiration?",
+      "type": "formula",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.9,
+      "abstained": false,
+      "latency_ms": 3.5
+    },
+    {
+      "id": "g4",
+      "question": "How does the Calvin cycle produce glyceraldehyde-3-phosphate?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 11.4
+    },
+    {
+      "id": "g5",
+      "question": "What are the stages of mitosis in order?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 0.2,
+      "best_score": 0.6167,
+      "abstained": true,
+      "latency_ms": 3.5
+    },
+    {
+      "id": "g6",
+      "question": "What is Newton's second law of motion equation?",
+      "type": "formula",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.66
+    },
+    {
+      "id": "g7",
+      "question": "What is the law of conservation of momentum?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 0.5,
+      "best_score": 0.8956,
+      "abstained": false,
+      "latency_ms": 3.34
+    },
+    {
+      "id": "g8",
+      "question": "Compare the properties of conductors, semiconductors, and insulators from the table",
+      "type": "table",
+      "hit_at_6": true,
+      "reciprocal_rank": 0.3333,
+      "best_score": 0.4704,
+      "abstained": true,
+      "latency_ms": 3.91
+    },
+    {
+      "id": "g9",
+      "question": "What is the formula for kinetic energy?",
+      "type": "formula",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.9,
+      "abstained": false,
+      "latency_ms": 3.61
+    },
+    {
+      "id": "g10",
+      "question": "How does thermodynamic entropy change in an isolated system?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.6
+    },
+    {
+      "id": "g11",
+      "question": "What is the definition and time complexity of binary search?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.67
+    },
+    {
+      "id": "g12",
+      "question": "What is Dijkstra's shortest path algorithm used for?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.92
+    },
+    {
+      "id": "g13",
+      "question": "What are the four ACID properties in database transaction management?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.6167,
+      "abstained": false,
+      "latency_ms": 3.78
+    },
+    {
+      "id": "g14",
+      "question": "Compare QuickSort and MergeSort algorithm complexities",
+      "type": "table",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.8952,
+      "abstained": false,
+      "latency_ms": 3.68
+    },
+    {
+      "id": "g15",
+      "question": "What is the difference between TCP and UDP transmission protocols?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.65
+    },
+    {
+      "id": "g16",
+      "question": "How do mitochondria generate ATP through oxidative phosphorylation?",
+      "type": "fact",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.64
+    },
+    {
+      "id": "g17",
+      "question": "What is Coulomb's law equation for electrostatic force?",
+      "type": "formula",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.73,
+      "abstained": false,
+      "latency_ms": 3.61
+    },
+    {
+      "id": "g18",
+      "question": "What is an AVL tree and how does it maintain balance?",
+      "type": "definition",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.6875,
+      "abstained": false,
+      "latency_ms": 3.53
+    },
+    {
+      "id": "g19",
+      "question": "How do light-dependent reactions in chloroplasts support the dark reactions in the stroma?",
+      "type": "multi-hop",
+      "hit_at_6": true,
+      "reciprocal_rank": 0.5,
+      "best_score": 0.5284,
+      "abstained": false,
+      "latency_ms": 3.94
+    },
+    {
+      "id": "g20",
+      "question": "Explain how conservation of momentum and kinetic energy govern elastic collisions",
+      "type": "multi-hop",
+      "hit_at_6": true,
+      "reciprocal_rank": 1.0,
+      "best_score": 0.4135,
+      "abstained": false,
+      "latency_ms": 3.91
+    }
+  ],
+  "unanswerable_results": [
+    {
+      "id": "u1",
+      "question": "What is the capital city of Australia and its population?",
+      "category": "geography",
+      "best_score": 0.469,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u2",
+      "question": "Who was the Roman emperor during the eruption of Mount Vesuvius in 79 AD?",
+      "category": "history",
+      "best_score": 0.551,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u3",
+      "question": "Explain quantum loop gravity and how it resolves black hole singularities",
+      "category": "advanced_theoretical_physics",
+      "best_score": 0.4103,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u4",
+      "question": "What are the clinical diagnostic criteria for Type 1 diabetes according to the ADA?",
+      "category": "clinical_medicine",
+      "best_score": 0.2905,
+      "abstained_correctly": true,
+      "reason": "insufficient_evidence"
+    },
+    {
+      "id": "u5",
+      "question": "What were Shakespeare's primary inspirations when writing King Lear?",
+      "category": "literature",
+      "best_score": 0.3329,
+      "abstained_correctly": true,
+      "reason": "insufficient_evidence"
+    },
+    {
+      "id": "u6",
+      "question": "How do lithium-ion battery cathode degradation mechanisms work at high voltages?",
+      "category": "materials_science",
+      "best_score": 0.2385,
+      "abstained_correctly": true,
+      "reason": "insufficient_evidence"
+    },
+    {
+      "id": "u7",
+      "question": "What are the rules and regulations for playing cricket according to the ICC?",
+      "category": "sports",
+      "best_score": 0.4683,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u8",
+      "question": "How does the French legal civil code differ from common law systems?",
+      "category": "law",
+      "best_score": 0.6848,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u9",
+      "question": "What are the key ingredients and cooking steps for traditional Japanese ramen broth?",
+      "category": "culinary",
+      "best_score": 0.3644,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    },
+    {
+      "id": "u10",
+      "question": "Who won the FIFA World Cup tournament in 2022 in Qatar?",
+      "category": "sports",
+      "best_score": 0.4069,
+      "abstained_correctly": true,
+      "reason": "insufficient_coverage"
+    }
+  ]
+}

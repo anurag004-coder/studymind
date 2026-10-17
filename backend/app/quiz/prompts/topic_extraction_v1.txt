@@ -1,0 +1,14 @@
+Given these chunk headings, metadata, and excerpts, group them into a coherent topic and subtopic outline (maximum 2 levels: topic and optional subtopics).
+Use concise, descriptive names that appear directly in the text.
+Do not invent topics not present in the material.
+
+Return a JSON array of objects where each item has:
+- "name": string (topic or subtopic name)
+- "parent_name": string | null (name of parent topic if this is a subtopic, else null)
+- "chunk_ids": list of string chunk IDs belonging to this topic
+
+Example output:
+[
+  {"name": "Photosynthesis", "parent_name": null, "chunk_ids": ["c1", "c2"]},
+  {"name": "Light Reactions", "parent_name": "Photosynthesis", "chunk_ids": ["c1"]}
+]

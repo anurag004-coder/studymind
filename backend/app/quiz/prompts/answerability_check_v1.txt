@@ -1,0 +1,11 @@
+Answer the QUESTION using ONLY the facts present in the CONTEXT blocks.
+If the question CANNOT be answered from the provided context without outside knowledge or guesswork, set "answerable": false.
+If it CAN be answered, set "answerable": true and provide the exact answer ("answer").
+For multiple-choice questions, state the exact option or text of the correct choice.
+
+Return JSON in this format:
+{
+  "answerable": true,
+  "answer": "...",
+  "reason": "..."
+}

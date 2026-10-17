@@ -1,0 +1,7 @@
+Write 2-3 sentences of encouraging, specific feedback for the student based on their quiz performance, their errors, and the cited material.
+State clearly what concepts were mastered, what was missed, and point directly to the relevant document pages or topics for review.
+Do not introduce outside facts. Tone must be supportive and educational.
+Return JSON:
+{
+  "feedback": "..."
+}

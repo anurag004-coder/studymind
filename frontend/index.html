@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <title>StudyMind — Grounded Study Assistant with Verified Citations</title>
+  <meta name="description" content="AI study assistant with strict grounding in uploaded student material, verified citations, and zero-hallucination abstention.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/index.css">
+</head>
+<body class="dark-theme">
+  <!-- App Container -->
+  <div id="app-root" class="app-container">
+
+    <!-- Collapsible Chatbot Sidebar (ChatGPT / Claude / Gemini Style) -->
+    <aside id="app-sidebar" class="app-sidebar">
+      <!-- Sidebar Header & Brand -->
+      <div class="sidebar-header">
+        <div class="nav-brand">
+          <div class="brand-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-title">StudyMind</span>
+            <span class="brand-badge">Grounded</span>
+          </div>
+        </div>
+        <button id="btn-collapse-sidebar" class="btn-sidebar-toggle" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+            <path d="M15 10l-2 2 2 2"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Prominent "+ New Chat" Action -->
+      <div class="sidebar-action-wrap">
+        <button id="btn-new-chat" class="btn-sidebar-new-chat" title="Start a fresh study chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>New Study Chat</span>
+        </button>
+      </div>
+
+      <!-- Workspace Selector -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Workspace</div>
+        <div class="nav-workspace-group">
+          <select id="workspace-select" class="nav-select" title="Current Workspace">
+            <option value="">Loading workspaces...</option>
+          </select>
+          <button id="btn-new-workspace" class="btn-icon" title="Create New Workspace" aria-label="Create New Workspace">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Navigation Tabs -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Views</div>
+        <nav class="panel-tabs sidebar-nav">
+          <button id="tab-chat-btn" class="tab-btn active sidebar-nav-item" data-tab="chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Study Chat</span>
+          </button>
+          <button id="tab-library-btn" class="tab-btn sidebar-nav-item" data-tab="library">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            <span>Course Library</span>
+            <span id="library-doc-count" class="badge-count">0</span>
+          </button>
+          <button id="tab-study-btn" class="tab-btn sidebar-nav-item" data-tab="study">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+            <span>Study Tools & Exam</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- Recent Conversations History (ChatGPT Style) -->
+      <div class="sidebar-section sidebar-history-section">
+        <div class="sidebar-section-header">
+          <span class="sidebar-section-title">Recent Chats</span>
+          <select id="conv-select" class="conv-dropdown hidden" title="Select Conversation">
+            <option value="">Default Study Chat</option>
+          </select>
+        </div>
+        <div id="sidebar-conv-list" class="sidebar-conv-list">
+          <!-- Populated dynamically with recent chat items -->
+        </div>
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <!-- Strict Grounding Toggle -->
+        <label id="strict-mode-container" class="strict-toggle-label" title="Strict Mode: Abstain if any detail cannot be strictly verified">
+          <span class="toggle-text">Strict Grounding</span>
+          <div class="toggle-switch">
+            <input type="checkbox" id="strict-mode-toggle">
+            <span class="toggle-slider"></span>
+          </div>
+        </label>
+
+        <!-- User Profile Pill -->
+        <div id="user-profile-badge" class="user-badge-sidebar hidden">
+          <div class="user-avatar-circle">🎓</div>
+          <div class="user-info-text">
+            <span id="user-role-badge" class="role-pill hidden">Guest</span>
+            <span id="user-email-text" class="user-email">student@studymind.io</span>
+          </div>
+          <div class="user-actions">
+            <button id="btn-save-guest" class="btn-text-subtle hidden" title="Sign In or Register to save your workspace">Save</button>
+            <button id="btn-logout" class="btn-text-subtle" title="Sign Out">Sign Out</button>
+          </div>
+        </div>
+        <button id="btn-open-login" class="btn-primary-sm btn-sidebar-login">Sign In</button>
+      </div>
+    </aside>
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
+
+    <!-- Main Stage Content Area -->
+    <div class="main-stage">
+      <!-- Top Navigation Bar -->
+      <header id="top-navbar" class="top-navbar">
+        <div class="nav-stage-left">
+          <button id="btn-toggle-sidebar" class="btn-sidebar-toggle" title="Toggle Sidebar" aria-label="Toggle Sidebar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <div class="model-status-pill">
+            <span class="status-sparkle">✨</span>
+            <span class="model-name">StudyMind 2.0</span>
+            <span class="model-badge-subtle">Grounded in Course Material</span>
+          </div>
+        </div>
+
+        <div class="nav-stage-right">
+          <!-- Toggle Source Document Inspector -->
+          <button id="btn-toggle-source-viewer" class="btn-viewer-toggle" title="Inspect Source Documents with Bounding Boxes">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span>Source Inspector</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Content Grid -->
+      <main class="main-layout">
+        <!-- Left Column: Study Assistant (Chat & Library) -->
+        <section class="left-panel">
+          <!-- Chat View (ChatGPT / Claude / Gemini Centered Stream) -->
+          <div id="chat-view" class="tab-content active">
+            <!-- Messages Thread -->
+            <div id="messages-container" class="messages-container">
+              <!-- Empty state banner -->
+              <div id="chat-empty-state" class="empty-state-card">
+                <div class="empty-state-icon">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                  </svg>
+                </div>
+                <h3>What would you like to explore from your course material?</h3>
+                <p>Upload study notes, PDFs, or lab sheets. Every response is strictly verified against your material with zero outside hallucinations.</p>
+                <div class="sample-chips">
+                  <button class="chip-btn chip-highlight" data-query="Generate questions and answers based on marks like 1 mark and 3 mark from the provided material">
+                    <span class="chip-icon">🎯</span>
+                    <span>"Generate 1-Mark & 3-Mark Q&A"</span>
+                  </button>
+                  <button class="chip-btn" data-query="What is word tokenization?">
+                    <span class="chip-icon">💡</span>
+                    <span>"What is word tokenization?"</span>
+                  </button>
+                  <button class="chip-btn" data-query="How is word tokenization implemented in Python?">
+                    <span class="chip-icon">💻</span>
+                    <span>"How is word tokenization implemented in Python?"</span>
+                  </button>
+                  <button class="chip-btn" data-query="What is the difference between word tokenization and simple whitespace splitting?">
+                    <span class="chip-icon">📖</span>
+                    <span>"Difference vs whitespace splitting"</span>
+                  </button>
+                  <button class="chip-btn" data-query="Summarize the topics on page 1">
+                    <span class="chip-icon">📄</span>
+                    <span>"Summarize page 1"</span>
+                  </button>
+                  <button class="chip-btn" data-query="Summarize the main topics of this document">
+                    <span class="chip-icon">📑</span>
+                    <span>"Summarize document topics"</span>
+                  </button>
+                  <button class="chip-btn" data-query="Summarize key concepts from my study notes.">
+                    <span class="chip-icon">🎯</span>
+                    <span>"Summarize key concepts"</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ChatGPT / Claude Floating Prompt Bar -->
+            <div class="chat-input-wrapper">
+              <!-- Quick Action Chips Bar -->
+              <div class="chat-quick-actions">
+                <button type="button" class="quick-chip-btn" id="btn-quick-marks" title="Generate 1-mark & 3-mark questions with answers in chat">
+                  <span>🎯 1 & 3 Mark Q&A</span>
+                </button>
+                <button type="button" class="quick-chip-btn" id="btn-quick-summary" title="Open Summary Tool (Reader Mode & Key Takeaways)">
+                  <span>📝 Summary</span>
+                </button>
+                <button type="button" class="quick-chip-btn" id="btn-quick-flashcards" title="Open Flashcards Tool (Interactive Flip Cards)">
+                  <span>🗂️ Flashcards</span>
+                </button>
+                <button type="button" class="quick-chip-btn" id="btn-quick-exam" title="Open Exam Engine (Timed Practice & Instant Rubrics)">
+                  <span>❓ Test Me</span>
+                </button>
+              </div>
+
+              <div id="pipeline-status-bar" class="pipeline-status hidden">
+                <div class="spinner-dot"></div>
+                <span id="pipeline-status-text">Searching indexed materials & verifying citations...</span>
+              </div>
+              <form id="chat-form" class="chat-form">
+                <button id="btn-input-attach" type="button" class="btn-attach" title="Attach Document (PDF, TXT, DOCX, Images)" aria-label="Attach Document">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                  </svg>
+                </button>
+                <textarea
+                  id="chat-input"
+                  class="chat-input"
+                  placeholder="Ask anything about your study materials... (e.g. 'What is word tokenization?')"
+                  rows="1"
+                  required
+                ></textarea>
+                <button id="btn-send-message" type="submit" class="btn-send" title="Send Question" aria-label="Send">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                  </svg>
+                </button>
+              </form>
+              <div class="input-disclaimer-text">
+                StudyMind strictly references your uploaded documents. Citations are verified deterministically.
+              </div>
+            </div>
+          </div>
+
+        <!-- Course Library View -->
+        <div id="library-view" class="tab-content hidden">
+          <!-- Upload Dropzone -->
+          <div id="upload-dropzone" class="upload-dropzone">
+            <input type="file" id="file-upload-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.docx,.pptx,.txt,.md" multiple>
+            <input type="file" id="gallery-upload-input" class="hidden-file-input" accept="image/*" multiple>
+            <input type="file" id="camera-upload-input" class="hidden-file-input" accept="image/*" capture="environment">
+            <div class="dropzone-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+            </div>
+            <h4 class="dropzone-title">Upload Study Materials</h4>
+            <p class="dropzone-subtitle">Drop files here, pick from photo gallery, or snap with mobile camera</p>
+            <div class="dropzone-actions-row">
+              <button id="btn-camera-upload" type="button" class="btn-browse btn-camera-action" title="Snap textbook or notes with mobile camera">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                <span>📸 Camera</span>
+              </button>
+              <button id="btn-gallery-upload" type="button" class="btn-browse btn-gallery-action" title="Pick study images from gallery">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>🖼️ Gallery</span>
+              </button>
+              <button id="btn-browse-files" type="button" class="btn-browse btn-files-action" title="Browse documents">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <span>📄 Browse Files</span>
+              </button>
+            </div>
+            <span class="dropzone-limits">Supports layout-aware PDF, OCR scan, camera photos & gallery, max 50 MB</span>
+          </div>
+
+          <!-- Ingestion Progress Card -->
+          <div id="ingestion-progress-card" class="progress-card hidden">
+            <div class="progress-header">
+              <span id="progress-doc-name" class="progress-filename">uploading.pdf</span>
+              <span id="progress-stage-badge" class="stage-badge">parsing</span>
+            </div>
+            <div class="progress-track">
+              <div id="progress-fill" class="progress-fill" style="width: 20%;"></div>
+            </div>
+            <div class="progress-footer">
+              <span id="progress-detail-text">Processing pages and layout coordinates...</span>
+              <span id="progress-percent-text">20%</span>
+            </div>
+          </div>
+
+          <!-- Document List Table -->
+          <div class="docs-section">
+            <div class="docs-section-header">
+              <h4>Uploaded Files</h4>
+              <button id="btn-refresh-docs" class="btn-icon-subtle" title="Refresh Documents">↻</button>
+            </div>
+            <div id="documents-table-container" class="docs-table-container">
+              <table id="documents-table" class="docs-table">
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Pages</th>
+                    <th>OCR Quality</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="documents-table-body">
+                  <tr>
+                    <td colspan="5" class="table-empty">No documents uploaded yet. Upload course materials above to begin.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Study Tools View -->
+        <div id="study-view" class="tab-content hidden">
+          <!-- Subtabs for Study Tools -->
+          <div class="study-subtabs">
+            <button id="study-subtab-summary" class="study-subtab-btn active" data-tool="summary">📝 Summary</button>
+            <button id="study-subtab-flashcards" class="study-subtab-btn" data-tool="flashcards">🗂️ Flashcards</button>
+            <button id="study-subtab-quiz" class="study-subtab-btn" data-tool="quiz">❓ Grounded Quiz</button>
+            <button id="study-subtab-exam" class="study-subtab-btn" data-tool="exam">🎯 Test Me (Exam Engine)</button>
+            <button id="study-subtab-saved" class="study-subtab-btn" data-tool="saved">📦 Saved & Exports</button>
+          </div>
+
+          <!-- 1. Summary Mode Section -->
+          <div id="study-summary-pane" class="study-pane active">
+            <div class="tool-controls-bar">
+              <div class="control-field">
+                <label for="summary-length-select">Length:</label>
+                <select id="summary-length-select" class="nav-select-sm">
+                  <option value="short">Short (Key takeaways)</option>
+                  <option value="medium" selected>Medium (Standard overview)</option>
+                  <option value="detailed">Detailed (Comprehensive guide)</option>
+                </select>
+              </div>
+              <button id="btn-generate-summary" class="btn-primary-sm">Generate Summary</button>
+              <button id="btn-reader-mode-toggle" class="btn-ghost-sm" title="Toggle Focused Reader Mode">📖 Reader Mode</button>
+            </div>
+            <div id="summary-output-container" class="tool-output-container">
+              <div class="tool-placeholder">Select length and click generate to create a grounded map-reduce summary.</div>
+            </div>
+          </div>
+
+          <!-- 2. Flashcards Mode Section -->
+          <div id="study-flashcards-pane" class="study-pane hidden">
+            <div class="tool-controls-bar">
+              <div class="control-field">
+                <label for="flashcards-count-select">Count:</label>
+                <select id="flashcards-count-select" class="nav-select-sm">
+                  <option value="3">3 cards</option>
+                  <option value="5" selected>5 cards</option>
+                  <option value="10">10 cards</option>
+                </select>
+              </div>
+              <button id="btn-generate-flashcards" class="btn-primary-sm">Generate More Cards</button>
+              <button id="btn-shuffle-flashcards" class="btn-ghost-sm" title="Shuffle current flashcards deck">🔀 Shuffle</button>
+              <button id="btn-clear-flashcards" class="btn-ghost-sm" title="Start a fresh flashcard deck">Fresh Deck</button>
+              <button id="btn-export-anki" class="btn-ghost-sm" title="Download Anki TSV Deck">Export Anki ↗</button>
+            </div>
+            <div id="flashcards-output-container" class="tool-output-container">
+              <div class="tool-placeholder">Generate flashcards to practice active recall with verified citations.</div>
+            </div>
+          </div>
+
+          <!-- 3. Grounded Quiz Mode Section -->
+          <div id="study-quiz-pane" class="study-pane hidden">
+            <div class="tool-controls-bar">
+              <div class="control-field">
+                <label for="quiz-count-select">Count:</label>
+                <select id="quiz-count-select" class="nav-select-sm">
+                  <option value="3">3 questions</option>
+                  <option value="5" selected>5 questions</option>
+                </select>
+              </div>
+              <div class="control-field">
+                <label for="quiz-difficulty-select">Difficulty:</label>
+                <select id="quiz-difficulty-select" class="nav-select-sm">
+                  <option value="easy">Easy</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </div>
+              <button id="btn-generate-quiz" class="btn-primary-sm">Generate Quiz</button>
+            </div>
+            <div id="quiz-output-container" class="tool-output-container">
+              <div class="tool-placeholder">Generate self-assessment multiple choice questions with grounded explanations.</div>
+            </div>
+          </div>
+
+          <!-- 4. Test Me / Exam Prep Engine Section (Phase 7B) -->
+          <div id="study-exam-pane" class="study-pane hidden">
+            <!-- Setup & Launch Controls -->
+            <div class="exam-setup-card">
+              <div class="exam-setup-header">
+                <div>
+                  <h4 style="margin:0; font-size:1.05rem; font-weight:700;">🎯 Test Me: Exam Readiness Hub</h4>
+                  <p style="margin:2px 0 0; font-size:0.8rem; color:var(--text-muted);">
+                    Server-side graded exams with answer keys withheld, SM-2 spaced repetition, and zero outside knowledge.
+                  </p>
+                </div>
+                <div class="exam-readiness-badge" id="exam-readiness-badge">
+                  <span class="readiness-label">Readiness</span>
+                  <span id="readiness-score-display" class="readiness-pct">--%</span>
+                </div>
+              </div>
+
+              <div class="tool-controls-bar" style="margin-top:12px; flex-wrap:wrap; gap:10px;">
+                <div class="control-field">
+                  <label for="exam-mode-select">Mode:</label>
+                  <select id="exam-mode-select" class="nav-select-sm">
+                    <option value="quick" selected>⚡ Quick Quiz (Instant Feedback)</option>
+                    <option value="mock">⏱️ Mock Exam (Timed, Keys Withheld)</option>
+                    <option value="drill">🎯 Weak-Topic Drill (Low Mastery)</option>
+                    <option value="spaced">🔁 Spaced Review (SM-2 Due Items)</option>
+                    <option value="adaptive">📈 Adaptive Practice</option>
+                  </select>
+                </div>
+
+                <div class="control-field">
+                  <label for="exam-count-select">Questions:</label>
+                  <select id="exam-count-select" class="nav-select-sm">
+                    <option value="3">3 Questions</option>
+                    <option value="5" selected>5 Questions</option>
+                    <option value="10">10 Questions</option>
+                    <option value="20">20 Questions (Full Paper)</option>
+                  </select>
+                </div>
+
+                <div class="control-field">
+                  <label for="exam-difficulty-select">Difficulty:</label>
+                  <select id="exam-difficulty-select" class="nav-select-sm">
+                    <option value="1">Level 1 (Foundation)</option>
+                    <option value="2">Level 2 (Recall)</option>
+                    <option value="3" selected>Level 3 (Conceptual)</option>
+                    <option value="4">Level 4 (Applied Analysis)</option>
+                    <option value="5">Level 5 (Exam Level)</option>
+                  </select>
+                </div>
+
+                <div class="control-field" id="exam-timer-field">
+                  <label for="exam-timer-select">Timer:</label>
+                  <select id="exam-timer-select" class="nav-select-sm">
+                    <option value="0">Untimed</option>
+                    <option value="900">15 Minutes</option>
+                    <option value="1800" selected>30 Minutes</option>
+                    <option value="3600">60 Minutes</option>
+                  </select>
+                </div>
+
+                <button id="btn-start-exam" class="btn-primary-sm" style="margin-left:auto;">🚀 Start Assessment</button>
+              </div>
+            </div>
+
+            <!-- Active Exam Runner View -->
+            <div id="exam-active-runner" class="exam-runner-card hidden">
+              <div class="exam-runner-header">
+                <div class="runner-mode-info">
+                  <span id="runner-mode-badge" class="exam-badge-mode">Quick Quiz</span>
+                  <span id="runner-progress-indicator" class="runner-counter">Question 1 of 5</span>
+                </div>
+                <div class="runner-timer-group">
+                  <span id="runner-timer-display" class="runner-timer hidden">⏱️ 30:00</span>
+                  <button id="btn-report-question" class="btn-icon-subtle" title="Report Bad Question (Instant Discard)" style="color:var(--rose);">🚩 Report</button>
+                </div>
+              </div>
+
+              <!-- Question Content Area -->
+              <div id="runner-question-card" class="runner-question-body">
+                <!-- Dynamically populated by app.js -->
+              </div>
+
+              <!-- Runner Navigation Bar -->
+              <div class="runner-nav-footer">
+                <button id="btn-runner-prev" class="btn-ghost-sm" disabled>◀ Previous</button>
+                <div style="display:flex; gap:8px;">
+                  <button id="btn-runner-next" class="btn-primary-sm">Next ▶</button>
+                  <button id="btn-runner-submit" class="btn-submit-exam hidden">Submit Complete Exam ✓</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Exam Results Report View -->
+            <div id="exam-results-card" class="exam-results-card hidden">
+              <!-- Dynamically populated by renderExamReport() -->
+            </div>
+          </div>
+
+          <!-- 5. Saved Items & Exports Section -->
+          <div id="study-saved-pane" class="study-pane hidden">
+            <div class="tool-controls-bar">
+              <button id="btn-refresh-study-items" class="btn-ghost-sm">↻ Refresh</button>
+              <button id="btn-download-anki-deck" class="btn-primary-sm">Download Anki TSV</button>
+              <button id="btn-download-study-guide" class="btn-ghost-sm">Download Guide (.md)</button>
+            </div>
+            <div id="saved-items-container" class="tool-output-container">
+              <div class="tool-placeholder">Loading saved study items...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Interactive Source Viewer (DoD Requirement) -->
+      <section id="source-viewer-panel" class="right-panel">
+        <!-- Viewer Header -->
+        <div class="viewer-header">
+          <div class="viewer-title-group">
+            <span class="viewer-icon">📄</span>
+            <div class="viewer-info">
+              <h4 id="viewer-doc-title" class="viewer-title">No Document Selected</h4>
+              <span id="viewer-citation-tag" class="citation-tag hidden">Referenced by Citation [1]</span>
+            </div>
+          </div>
+
+          <!-- Viewer Controls -->
+          <div class="viewer-controls">
+            <!-- Page Navigation -->
+            <div class="page-nav-group">
+              <button id="btn-prev-page" class="btn-icon-sm" title="Previous Page" disabled>◀</button>
+              <span id="viewer-page-indicator" class="page-indicator">Page 1 / 1</span>
+              <button id="btn-next-page" class="btn-icon-sm" title="Next Page" disabled>▶</button>
+            </div>
+
+            <!-- Zoom Controls -->
+            <div class="zoom-group">
+              <button id="btn-zoom-out" class="btn-icon-sm" title="Zoom Out">−</button>
+              <span id="zoom-level-text" class="zoom-level">100%</span>
+              <button id="btn-zoom-in" class="btn-icon-sm" title="Zoom In">+</button>
+              <button id="btn-zoom-fit" class="btn-icon-sm" title="Reset Zoom">Fit</button>
+            </div>
+
+            <button id="btn-summarize-current-page" class="btn-ghost-sm" title="Summarize topics of current page" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:500; padding:4px 9px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:var(--text-primary); cursor:pointer;">
+              <span>📝</span>
+              <span>Summarize Page</span>
+            </button>
+            <button id="btn-download-file" class="btn-icon-sm" title="Download Document" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+            <button id="btn-close-viewer" class="btn-icon-sm" title="Close Source Viewer" aria-label="Close Inspector">✕</button>
+          </div>
+        </div>
+
+        <!-- Viewer Viewport -->
+        <div id="viewer-viewport" class="viewer-viewport">
+          <!-- Empty State -->
+          <div id="viewer-empty-state" class="viewer-placeholder">
+            <div class="placeholder-icon">🎯</div>
+            <h3>Grounded Source Viewer</h3>
+            <p>Click any citation pill <span class="pill-preview">[1]</span> or document in your library to inspect the exact highlighted page region and verified quote.</p>
+          </div>
+
+          <!-- Document Stage Container -->
+          <div id="viewer-stage" class="viewer-stage hidden">
+            <div id="viewer-content-wrapper" class="viewer-wrapper">
+              <!-- Rendered Page Image -->
+              <img id="viewer-page-image" class="page-image" alt="Rendered document page" src="">
+
+              <!-- Animated Bounding Box Highlight Overlay (DoD Requirement) -->
+              <div id="source-highlight-box" class="highlight-overlay hidden">
+                <div class="highlight-pulse-glow"></div>
+                <!-- Floating Quote Tooltip -->
+                <div id="source-quote-tooltip" class="highlight-tooltip">
+                  <div class="tooltip-header">
+                    <span id="tooltip-citation-num" class="tooltip-badge">Citation [1]</span>
+                    <span id="tooltip-verified-badge" class="verified-badge">✓ Verified Quote</span>
+                  </div>
+                  <p id="tooltip-quote-text" class="tooltip-quote">Supporting quotation from source text...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    </div> <!-- End .main-stage -->
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-logo">
+            <div class="brand-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+              </svg>
+            </div>
+            <span class="brand-title">StudyMind</span>
+          </div>
+          <button id="btn-close-auth" class="btn-icon-close" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="auth-tabs">
+          <button id="auth-tab-login" class="auth-tab-btn active">Sign In</button>
+          <button id="auth-tab-register" class="auth-tab-btn">Create Account</button>
+        </div>
+
+        <form id="auth-form" class="auth-form">
+          <div class="form-group">
+            <label for="auth-email">Email Address</label>
+            <input type="email" id="auth-email" class="form-input" placeholder="student@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="auth-password">Password</label>
+            <input type="password" id="auth-password" class="form-input" placeholder="••••••••" minlength="8" required>
+          </div>
+          <div id="auth-error-msg" class="form-error hidden"></div>
+
+          <button id="btn-auth-submit" type="submit" class="btn-submit">Sign In</button>
+
+          <div class="auth-divider"><span>or explore immediately</span></div>
+
+          <button id="btn-continue-guest" type="button" class="btn-demo" style="margin-bottom:8px;">
+            👤 Continue as Guest (No Sign-In Required)
+          </button>
+          <button id="btn-demo-account" type="button" class="btn-demo">
+            ⚡ Quick Demo Student Account
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- New Workspace Modal -->
+    <div id="workspace-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <h3>Create Study Workspace</h3>
+          <button id="btn-close-workspace-modal" class="btn-icon-close">&times;</button>
+        </div>
+        <form id="workspace-form" class="auth-form">
+          <div class="form-group">
+            <label for="new-workspace-name">Workspace Name</label>
+            <input type="text" id="new-workspace-name" class="form-input" placeholder="e.g. Physics 101 or Bio Chem" required>
+          </div>
+          <button id="btn-create-workspace-submit" type="submit" class="btn-submit">Create Workspace</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <h3>Feedback on Answer</h3>
+          <button id="btn-close-feedback" class="btn-icon-close">&times;</button>
+        </div>
+        <form id="feedback-form" class="auth-form">
+          <input type="hidden" id="feedback-message-id" value="">
+          <input type="hidden" id="feedback-rating" value="down">
+
+          <div class="form-group">
+            <label for="feedback-reason">Reason for feedback</label>
+            <select id="feedback-reason" class="form-input">
+              <option value="not_in_source">Fact not found in source material</option>
+              <option value="wrong">Answer statement is incorrect</option>
+              <option value="incomplete">Incomplete or missing key detail</option>
+              <option value="other">Other issue</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="feedback-comment">Optional Comments</label>
+            <textarea id="feedback-comment" class="form-input" rows="3" placeholder="Provide extra detail..."></textarea>
+          </div>
+
+          <button id="btn-submit-feedback" type="submit" class="btn-submit">Submit Review</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Report Question Modal (QUIZ_ASSESSMENT.md §3) -->
+    <div id="report-question-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <h3>🚩 Report Question</h3>
+          <button id="btn-close-report-modal" class="btn-icon-close">&times;</button>
+        </div>
+        <form id="report-question-form" class="auth-form">
+          <input type="hidden" id="report-question-id" value="">
+          <p style="font-size:0.8rem; color:var(--text-muted); margin:0 0 10px;">
+            Reporting this question immediately disables it from future quizzes and flags it for audit.
+          </p>
+          <div class="form-group">
+            <label for="report-reason-select">Reason</label>
+            <select id="report-reason-select" class="form-input">
+              <option value="not_in_material">Answer not found in my study material</option>
+              <option value="wrong_key">Wrong answer key or explanation</option>
+              <option value="unclear">Ambiguous or poorly phrased question</option>
+              <option value="typo">OCR or typographical error</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="report-comment-input">Explanation / Details</label>
+            <textarea id="report-comment-input" class="form-input" rows="3" placeholder="Describe the issue..."></textarea>
+          </div>
+          <button id="btn-submit-report-modal" type="submit" class="btn-submit" style="background:var(--rose);">Flag & Retire Question</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Attach Options Sheet / Modal (Camera, Gallery, Files) -->
+    <div id="attach-menu-modal" class="modal-backdrop hidden">
+      <div class="modal-card attach-sheet-card">
+        <div class="modal-header">
+          <div class="attach-sheet-title">
+            <span class="attach-sheet-badge">📎</span>
+            <div>
+              <h3>Add Study Material</h3>
+              <p class="modal-subtitle">Snap physical notes or import documents into your workspace</p>
+            </div>
+          </div>
+          <button id="btn-close-attach-menu" class="btn-icon-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="attach-options-grid">
+          <button type="button" class="attach-option-card" id="btn-opt-camera">
+            <div class="attach-card-icon camera-bg">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+            </div>
+            <div class="attach-card-info">
+              <div class="attach-card-heading">
+                <span class="attach-card-title">Camera / Snap Notes</span>
+                <span class="badge-pill-accent">Mobile</span>
+              </div>
+              <span class="attach-card-desc">Take a photo of physical textbook pages, blackboard, or handwritten notes</span>
+            </div>
+            <span class="attach-arrow">&rsaquo;</span>
+          </button>
+
+          <button type="button" class="attach-option-card" id="btn-opt-gallery">
+            <div class="attach-card-icon gallery-bg">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+            <div class="attach-card-info">
+              <div class="attach-card-heading">
+                <span class="attach-card-title">Photo Gallery</span>
+                <span class="badge-pill-accent">Images</span>
+              </div>
+              <span class="attach-card-desc">Choose existing screenshots, photos, or diagrams from your device</span>
+            </div>
+            <span class="attach-arrow">&rsaquo;</span>
+          </button>
+
+          <button type="button" class="attach-option-card" id="btn-opt-files">
+            <div class="attach-card-icon files-bg">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+            </div>
+            <div class="attach-card-info">
+              <div class="attach-card-heading">
+                <span class="attach-card-title">Browse Files & Docs</span>
+                <span class="badge-pill-subtle">PDF / DOCX</span>
+              </div>
+              <span class="attach-card-desc">Upload PDF books, DOCX, PPTX slides, Markdown, or text files</span>
+            </div>
+            <span class="attach-arrow">&rsaquo;</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-App Camera Scanner Viewfinder Modal -->
+    <div id="camera-modal" class="modal-backdrop hidden">
+      <div class="modal-card camera-scanner-card">
+        <div class="modal-header camera-modal-header">
+          <div class="camera-header-info">
+            <span class="pulse-indicator-red"></span>
+            <h3>📸 Scan Study Material</h3>
+          </div>
+          <button id="btn-close-camera-modal" class="btn-icon-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="camera-viewfinder-container">
+          <video id="camera-video-preview" autoplay playsinline muted></video>
+          <canvas id="camera-canvas-capture" class="hidden"></canvas>
+          <div class="camera-scan-frame">
+            <div class="camera-corner top-left"></div>
+            <div class="camera-corner top-right"></div>
+            <div class="camera-corner bottom-left"></div>
+            <div class="camera-corner bottom-right"></div>
+            <div class="camera-scan-line"></div>
+            <div class="camera-scan-tip">Align note page or textbook inside frame</div>
+          </div>
+        </div>
+        <div class="camera-controls-footer">
+          <button type="button" id="btn-camera-flip" class="btn-ghost-sm" title="Switch between front and back cameras">
+            🔄 Flip
+          </button>
+          <button type="button" id="btn-camera-capture" class="btn-shutter-trigger" title="Snap & Upload">
+            <div class="shutter-inner"></div>
+          </button>
+          <button type="button" id="btn-camera-native" class="btn-ghost-sm" title="Open Native Camera App">
+            📱 Native
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

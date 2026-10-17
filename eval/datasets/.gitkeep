@@ -1,0 +1,8 @@
+# Evaluation Datasets Directory per EVALUATION.md
+# Expected files:
+# - gold_answerable.jsonl (>= 100 questions)
+# - unanswerable.jsonl (>= 50 questions)
+# - adversarial.jsonl (>= 30 questions)
+# - multi_doc.jsonl (>= 20 questions)
+# - ocr_set/ (30 pages)
+# - quiz_*.jsonl
