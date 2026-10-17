@@ -3221,8 +3221,22 @@ button, input, select, textarea {
   }
 
   .top-navbar {
-    padding: 0 12px;
-    height: 52px;
+    padding: 0 10px;
+    height: 48px;
+    gap: 8px;
+  }
+
+  .top-navbar-brand {
+    gap: 6px;
+  }
+
+  .brand-logo-text {
+    font-size: 0.92rem;
+  }
+
+  .server-status-pill {
+    padding: 3px 8px;
+    font-size: 0.68rem;
   }
 
   .model-badge-subtle {
@@ -3231,7 +3245,7 @@ button, input, select, textarea {
 
   .main-layout {
     flex-direction: column;
-    height: calc(100dvh - 52px);
+    height: calc(100dvh - 48px);
   }
 
   /* Mobile Bottom Navigation Bar */
@@ -3280,13 +3294,169 @@ button, input, select, textarea {
 
   /* Chat form and input on mobile */
   .chat-input-wrapper {
-    padding: 10px 12px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    padding: 6px 10px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
     margin-bottom: 56px;
+    background: linear-gradient(180deg, rgba(27, 26, 24, 0) 0%, rgba(27, 26, 24, 0.92) 24%, rgba(27, 26, 24, 1) 100%);
+    z-index: 90;
+    width: 100%;
+  }
+
+  .chat-quick-actions {
+    display: flex;
+    gap: 6px;
+    padding: 2px 2px 6px;
+    margin-bottom: 3px;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+  }
+
+  .quick-chip-btn {
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    border-radius: 14px;
+    flex-shrink: 0;
+  }
+
+  .chat-form {
+    padding: 4px 8px;
+    border-radius: 24px;
+    gap: 6px;
+    background: #242220;
+    border: 1px solid #3c3833;
+    width: 100%;
+  }
+
+  .btn-attach {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+
+  .btn-send {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+
+  .chat-input {
+    font-size: 15px;
+    padding: 5px 2px;
+    line-height: 1.4;
+    min-height: 24px;
+  }
+
+  .input-disclaimer-text {
+    font-size: 0.65rem;
+    margin-top: 3px;
+    line-height: 1.25;
+    opacity: 0.7;
+    text-align: center;
   }
 
   .messages-container {
-    padding: 14px 12px 140px;
+    padding: 10px 12px 185px !important;
+  }
+
+  /* Empty State Card fitting on mobile */
+  .empty-state-card {
+    margin: 10px auto 6px !important;
+    padding: 16px 12px !important;
+    border-radius: 16px !important;
+    background: rgba(36, 34, 32, 0.5) !important;
+  }
+
+  .empty-state-icon {
+    width: 36px !important;
+    height: 36px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .empty-state-icon svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .empty-state-card h3 {
+    font-size: 1.05rem !important;
+    line-height: 1.3 !important;
+    margin-bottom: 4px !important;
+  }
+
+  .empty-state-card p {
+    font-size: 0.78rem !important;
+    line-height: 1.35 !important;
+    margin-bottom: 12px !important;
+    color: var(--text-muted) !important;
+  }
+
+  .sample-chips {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  .chip-btn {
+    width: 100% !important;
+    padding: 8px 10px !important;
+    font-size: 0.78rem !important;
+    border-radius: 9px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    background: rgba(40, 37, 34, 0.85) !important;
+    border: 1px solid #3c3833 !important;
+  }
+
+  .chip-btn span:last-child {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  /* Show only top 4 sample prompt chips on mobile to prevent clutter */
+  .sample-chips .chip-btn:nth-child(n+5) {
+    display: none !important;
+  }
+
+  /* Toast Container at top of screen on mobile */
+  .toast-container {
+    position: fixed !important;
+    top: max(54px, calc(env(safe-area-inset-top) + 50px)) !important;
+    bottom: auto !important;
+    left: 12px !important;
+    right: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    pointer-events: none !important;
+    z-index: 250 !important;
+  }
+
+  .toast {
+    pointer-events: auto !important;
+    width: 100% !important;
+    max-width: 360px !important;
+    padding: 10px 14px !important;
+    font-size: 0.8rem !important;
+    border-radius: 12px !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75) !important;
+    animation: toastSlideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  @keyframes toastSlideDown {
+    from { transform: translateY(-16px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
   }
 
   /* Source Inspector overlay sheet on mobile */
@@ -3393,17 +3563,7 @@ button, input, select, textarea {
     border-radius: var(--radius-md);
   }
 
-  .chat-form {
-    padding: 6px 10px;
-  }
 
-  .chat-input {
-    font-size: 16px; /* Prevents auto-zoom on iOS Safari */
-  }
-
-  .messages-container {
-    padding: 14px 12px 100px;
-  }
 
   /* Study Tools Subtabs: Horizontal Scroll */
   .study-subtabs {

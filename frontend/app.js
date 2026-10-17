@@ -312,36 +312,109 @@ function setupPdfJsWorker() {
   }
 }
 
-function extractPdfDirectFallback(file, arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
+async function extractPdfDirectFallback(file, maybeArrayBuffer) {
+  let bytes = null;
+  try {
+    if (maybeArrayBuffer && maybeArrayBuffer.byteLength > 0) {
+      bytes = new Uint8Array(maybeArrayBuffer);
+    }
+  } catch (e) {
+    bytes = null;
+  }
+  if (!bytes) {
+    try {
+      const freshBuf = await file.arrayBuffer();
+      bytes = new Uint8Array(freshBuf);
+    } catch (e) {
+      console.error('Failed to read file buffer in fallback:', e);
+      return { numPages: 1, pages: [], chunks: [] };
+    }
+  }
+
+  const extractedLines = [];
+
+  function extractLinesFromPdfText(text) {
+    if (!text) return;
+    const tjRegex = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")/g;
+    let match;
+    while ((match = tjRegex.exec(text)) !== null) {
+      const clean = match[1].replace(/\\([()\\])/g, '$1').trim();
+      if (clean.length > 2 && /[a-zA-Z0-9]/.test(clean)) {
+        extractedLines.push(clean);
+      }
+    }
+
+    const tjArrayRegex = /\[([^\]]+)\]\s*TJ/g;
+    while ((match = tjArrayRegex.exec(text)) !== null) {
+      const inner = match[1];
+      const subMatches = inner.match(/\(([^)\\]*(?:\\.[^)\\]*)*)\)/g);
+      if (subMatches) {
+        const line = subMatches
+          .map((s) => s.slice(1, -1).replace(/\\([()\\])/g, '$1').trim())
+          .join(' ');
+        if (line.length > 2 && /[a-zA-Z0-9]/.test(line)) {
+          extractedLines.push(line);
+        }
+      }
+    }
+  }
+
   let binaryStr = '';
   const len = bytes.byteLength;
-  const maxRead = Math.min(len, 2 * 1024 * 1024);
+  const maxRead = Math.min(len, 3 * 1024 * 1024);
   for (let i = 0; i < maxRead; i++) {
     binaryStr += String.fromCharCode(bytes[i]);
   }
 
-  const extractedLines = [];
-  const tjRegex = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")/g;
-  let match;
-  while ((match = tjRegex.exec(binaryStr)) !== null) {
-    const clean = match[1].replace(/\\([()\\])/g, '$1').trim();
-    if (clean.length > 3 && /[a-zA-Z]/.test(clean)) {
-      extractedLines.push(clean);
-    }
-  }
+  // 1. Raw text extraction
+  extractLinesFromPdfText(binaryStr);
 
-  const tjArrayRegex = /\[([^\]]+)\]\s*TJ/g;
-  while ((match = tjArrayRegex.exec(binaryStr)) !== null) {
-    const inner = match[1];
-    const subMatches = inner.match(/\(([^)\\]*(?:\\.[^)\\]*)*)\)/g);
-    if (subMatches) {
-      const line = subMatches
-        .map((s) => s.slice(1, -1).replace(/\\([()\\])/g, '$1').trim())
-        .join(' ');
-      if (line.length > 3 && /[a-zA-Z]/.test(line)) {
-        extractedLines.push(line);
+  // 2. Stream decompression for Deflate (FlateDecode)
+  if (extractedLines.length < 5 && typeof DecompressionStream !== 'undefined') {
+    try {
+      const streamMarker = 'stream';
+      const endMarker = 'endstream';
+      let pos = 0;
+      let streamCount = 0;
+      while ((pos = binaryStr.indexOf(streamMarker, pos)) !== -1 && streamCount < 30) {
+        pos += streamMarker.length;
+        if (binaryStr.charCodeAt(pos) === 13) pos++;
+        if (binaryStr.charCodeAt(pos) === 10) pos++;
+        const endPos = binaryStr.indexOf(endMarker, pos);
+        if (endPos === -1) break;
+
+        const streamBytes = bytes.slice(pos, endPos);
+        if (streamBytes.length > 8) {
+          try {
+            const ds = new DecompressionStream('deflate');
+            const writer = ds.writable.getWriter();
+            writer.write(streamBytes);
+            writer.close();
+            const reader = ds.readable.getReader();
+            const chunks = [];
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+            }
+            const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+            const decompressed = new Uint8Array(totalLen);
+            let off = 0;
+            for (const c of chunks) {
+              decompressed.set(c, off);
+              off += c.length;
+            }
+            const decompressedStr = new TextDecoder('utf-8', { fatal: false }).decode(decompressed);
+            extractLinesFromPdfText(decompressedStr);
+          } catch (streamErr) {
+            // Not a deflate stream or partial block
+          }
+        }
+        pos = endPos + endMarker.length;
+        streamCount++;
       }
+    } catch (e) {
+      console.warn('DecompressionStream error:', e);
     }
   }
 
@@ -433,12 +506,20 @@ async function extractDocxFileClientSide(file) {
 
 async function extractPdfClientSide(file) {
   setupPdfJsWorker();
-  const arrayBuffer = await file.arrayBuffer();
+  let freshBuffer = null;
+  try {
+    freshBuffer = await file.arrayBuffer();
+  } catch (e) {
+    console.error('Failed to read file buffer:', e);
+  }
 
-  if (typeof pdfjsLib !== 'undefined') {
+  if (typeof pdfjsLib !== 'undefined' && freshBuffer) {
     try {
+      // Pass a clone of the buffer so PDF.js worker can never detach our source buffer
+      const clonedData = new Uint8Array(freshBuffer.slice(0));
       const loadingTask = pdfjsLib.getDocument({
-        data: arrayBuffer,
+        data: clonedData,
+        disableWorker: true, // Prevents cross-origin worker sandbox termination on mobile Chrome!
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
@@ -525,8 +606,8 @@ async function extractPdfClientSide(file) {
     }
   }
 
-  // Fallback to direct stream parser if PDF.js fails
-  return extractPdfDirectFallback(file, arrayBuffer);
+  // Fallback to direct stream parser - always pass file to get fresh un-detached buffer!
+  return await extractPdfDirectFallback(file);
 }
 
 async function extractTextFileClientSide(file) {
