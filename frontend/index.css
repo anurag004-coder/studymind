@@ -1668,6 +1668,20 @@ button, input, select, textarea {
   flex-shrink: 0;
 }
 
+.viewer-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-viewer-back-mobile {
+  display: none;
+}
+
+.mobile-bottom-nav {
+  display: none;
+}
+
 .viewer-title-group {
   display: flex;
   align-items: center;
@@ -3220,6 +3234,61 @@ button, input, select, textarea {
     height: calc(100dvh - 52px);
   }
 
+  /* Mobile Bottom Navigation Bar */
+  .mobile-bottom-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: rgba(22, 20, 18, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border-color);
+    z-index: 95;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    gap: 3px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    flex: 1;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-nav-item.active {
+    color: var(--primary-light);
+  }
+
+  .mobile-nav-item.active svg {
+    stroke: var(--primary-light);
+  }
+
+  /* Chat form and input on mobile */
+  .chat-input-wrapper {
+    padding: 10px 12px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    margin-bottom: 56px;
+  }
+
+  .messages-container {
+    padding: 14px 12px 140px;
+  }
+
   /* Source Inspector overlay sheet on mobile */
   .right-panel {
     position: fixed;
@@ -3230,25 +3299,98 @@ button, input, select, textarea {
     width: 100vw !important;
     min-width: 100vw !important;
     height: 100dvh !important;
-    z-index: 98;
+    z-index: 105;
     background: var(--bg-dark);
     display: flex;
     flex-direction: column;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .right-panel.hidden {
     display: none !important;
   }
 
-  .viewer-controls {
-    flex-wrap: wrap;
-    gap: 6px;
+  .btn-viewer-back-mobile {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
   }
 
-  /* Chat form and input on mobile */
-  .chat-input-wrapper {
-    padding: 10px 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  .btn-viewer-back-mobile:active {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .viewer-header {
+    height: auto;
+    min-height: 52px;
+    padding: 8px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    background: rgba(20, 19, 17, 0.96);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .viewer-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .viewer-title-group {
+    max-width: calc(100% - 110px);
+  }
+
+  .viewer-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 2px;
+    gap: 6px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .viewer-controls::-webkit-scrollbar {
+    display: none;
+  }
+
+  .viewer-viewport {
+    flex: 1;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .viewer-wrapper {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .page-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
   }
 
   .chat-form {

@@ -547,15 +547,25 @@
       </section>
 
       <!-- Right Column: Interactive Source Viewer (DoD Requirement) -->
-      <section id="source-viewer-panel" class="right-panel">
+      <section id="source-viewer-panel" class="right-panel hidden">
         <!-- Viewer Header -->
         <div class="viewer-header">
-          <div class="viewer-title-group">
-            <span class="viewer-icon">📄</span>
-            <div class="viewer-info">
-              <h4 id="viewer-doc-title" class="viewer-title">No Document Selected</h4>
-              <span id="viewer-citation-tag" class="citation-tag hidden">Referenced by Citation [1]</span>
+          <div class="viewer-top-row">
+            <button id="btn-viewer-mobile-back" class="btn-viewer-back-mobile" title="Back to Chat" aria-label="Back to Chat">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+              <span>Back</span>
+            </button>
+            <div class="viewer-title-group">
+              <span class="viewer-icon">📄</span>
+              <div class="viewer-info">
+                <h4 id="viewer-doc-title" class="viewer-title">No Document Selected</h4>
+                <span id="viewer-citation-tag" class="citation-tag hidden">Referenced by Citation [1]</span>
+              </div>
             </div>
+            <button id="btn-close-viewer" class="btn-icon-sm btn-close-viewer-header" title="Close Source Viewer" aria-label="Close Inspector">✕</button>
           </div>
 
           <!-- Viewer Controls -->
@@ -575,7 +585,7 @@
               <button id="btn-zoom-fit" class="btn-icon-sm" title="Reset Zoom">Fit</button>
             </div>
 
-            <button id="btn-summarize-current-page" class="btn-ghost-sm" title="Summarize topics of current page" style="display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:500; padding:4px 9px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:var(--text-primary); cursor:pointer;">
+            <button id="btn-summarize-current-page" class="btn-ghost-sm" title="Summarize topics of current page">
               <span>📝</span>
               <span>Summarize Page</span>
             </button>
@@ -586,7 +596,6 @@
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
             </button>
-            <button id="btn-close-viewer" class="btn-icon-sm" title="Close Source Viewer" aria-label="Close Inspector">✕</button>
           </div>
         </div>
 
@@ -622,6 +631,38 @@
         </div>
       </section>
     </main>
+
+    <!-- Mobile Bottom Navigation Bar (Visible on mobile <= 768px) -->
+    <nav id="mobile-bottom-nav" class="mobile-bottom-nav" aria-label="Mobile Navigation">
+      <button id="mobile-tab-chat" class="mobile-nav-item active" data-tab="chat">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span>Chat</span>
+      </button>
+      <button id="mobile-tab-library" class="mobile-nav-item" data-tab="library">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+        <span>Library</span>
+      </button>
+      <button id="mobile-tab-study" class="mobile-nav-item" data-tab="study">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        <span>Study</span>
+      </button>
+      <button id="mobile-tab-source" class="mobile-nav-item" data-tab="source">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+        <span>Source</span>
+      </button>
+    </nav>
     </div> <!-- End .main-stage -->
 
     <!-- Auth Modal -->

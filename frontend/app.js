@@ -1341,6 +1341,11 @@ function escapeHtml(text) {
 async function initApp() {
   bindEventListeners();
 
+  // On mobile/tablet screens, ensure Source Viewer is closed so user lands cleanly on Chat
+  if (window.innerWidth <= 1024) {
+    setViewerOpen(false);
+  }
+
   if (state.token) {
     try {
       state.user = await apiRequest('/auth/me');
@@ -1701,7 +1706,7 @@ async function handleMultipleFiles(files) {
 
   await loadDocuments();
 
-  if (lastDocId) {
+  if (lastDocId && window.innerWidth > 768) {
     openSourceViewer(lastDocId, 1, lastPages);
   }
 
@@ -2157,8 +2162,8 @@ async function handleSendMessage(question) {
     statusBar.classList.add('hidden');
     appendAssistantMessage(payload);
 
-    // If citations are available, automatically highlight the first one in the viewer
-    if (payload.citations && payload.citations.length > 0) {
+    // If citations are available, automatically highlight the first one in the viewer on desktop
+    if (payload.citations && payload.citations.length > 0 && window.innerWidth > 768) {
       triggerCitationHighlight(payload.citations[0]);
     }
   } catch (err) {
@@ -2178,9 +2183,20 @@ function setViewerOpen(open) {
   if (open) {
     viewerPanel.classList.remove('hidden');
     toggleViewerBtn?.classList.add('active');
+    document.getElementById('mobile-tab-source')?.classList.add('active');
   } else {
     viewerPanel.classList.add('hidden');
     toggleViewerBtn?.classList.remove('active');
+    document.getElementById('mobile-tab-source')?.classList.remove('active');
+    // Restore active tab highlight in mobile navigation
+    const currentActiveView = document.querySelector('.main-stage-view.active');
+    if (currentActiveView) {
+      const viewId = currentActiveView.id;
+      const tabName = viewId === 'library-view' ? 'library' : viewId === 'study-view' ? 'study' : 'chat';
+      document.querySelectorAll('.mobile-nav-item').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+      });
+    }
   }
 }
 
@@ -2527,6 +2543,10 @@ function bindEventListeners() {
       document.getElementById('sidebar-backdrop')?.classList.add('hidden');
     }
     [tabChatBtn, tabLibBtn, tabStudyBtn].forEach((btn) => btn?.classList.remove('active'));
+    document.querySelectorAll('.mobile-nav-item').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === target);
+    });
+
     [chatView, libView, studyView].forEach((view) => {
       view?.classList.add('hidden');
       view?.classList.remove('active');
@@ -2551,6 +2571,23 @@ function bindEventListeners() {
   tabChatBtn?.addEventListener('click', () => switchMainTab('chat'));
   tabLibBtn?.addEventListener('click', () => switchMainTab('library'));
   tabStudyBtn?.addEventListener('click', () => switchMainTab('study'));
+
+  // Mobile Bottom Navigation Bar Tabs
+  document.getElementById('mobile-tab-chat')?.addEventListener('click', () => {
+    setViewerOpen(false);
+    switchMainTab('chat');
+  });
+  document.getElementById('mobile-tab-library')?.addEventListener('click', () => {
+    setViewerOpen(false);
+    switchMainTab('library');
+  });
+  document.getElementById('mobile-tab-study')?.addEventListener('click', () => {
+    setViewerOpen(false);
+    switchMainTab('study');
+  });
+  document.getElementById('mobile-tab-source')?.addEventListener('click', () => {
+    setViewerOpen(true);
+  });
   bindStudyToolsEvents();
   initExamPrepEngine();
 
@@ -2666,6 +2703,9 @@ function bindEventListeners() {
     }
   });
   closeViewerBtn?.addEventListener('click', () => {
+    setViewerOpen(false);
+  });
+  document.getElementById('btn-viewer-mobile-back')?.addEventListener('click', () => {
     setViewerOpen(false);
   });
 
