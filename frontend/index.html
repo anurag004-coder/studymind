@@ -938,16 +938,17 @@
     <div id="toast-container" class="toast-container"></div>
   </div>
 
-  <!-- PDF.js for Client-Side Class Notes & PDF Ingestion -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- PDF.js for Client-Side Class Notes & PDF Ingestion (Self-Hosted for 100% Mobile Reliability) -->
+  <script src="/static/pdf.min.js"></script>
   <script>
+    if (typeof pdfjsLib === 'undefined') {
+      var cdnScript = document.createElement('script');
+      cdnScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      document.head.appendChild(cdnScript);
+    }
     if (typeof pdfjsLib !== 'undefined') {
       try {
-        const workerBlob = new Blob(
-          ["importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js');"],
-          { type: 'application/javascript' }
-        );
-        pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.origin + '/static/pdf.worker.min.js';
       } catch (e) {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }

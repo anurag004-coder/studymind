@@ -3565,35 +3565,61 @@ button, input, select, textarea {
 
 
 
-  /* Study Tools Subtabs: Horizontal Scroll */
+  /* Study Tools Subtabs: Smooth Horizontal Scroll */
   .study-subtabs {
-    overflow-x: auto;
-    white-space: nowrap;
-    padding-bottom: 6px;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    display: flex !important;
+    gap: 6px !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    padding: 4px !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    width: 100% !important;
+    border-radius: var(--radius-md) !important;
   }
 
   .study-subtabs::-webkit-scrollbar {
-    display: none;
+    display: none !important;
   }
 
   .study-subtab-btn {
-    flex-shrink: 0;
+    flex-shrink: 0 !important;
+    padding: 6px 12px !important;
+    font-size: 0.8rem !important;
+    white-space: nowrap !important;
   }
 
-  /* Controls bar stacking */
+  /* Controls bar structured mobile grid */
   .tool-controls-bar {
-    flex-wrap: wrap;
-    gap: 8px;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
   }
 
-  .control-field {
-    flex-grow: 1;
+  .tool-controls-bar .control-field {
+    flex: 1 1 100% !important;
+    min-width: 140px !important;
   }
 
-  .control-field select {
-    width: 100%;
+  .tool-controls-bar .control-field select {
+    width: 100% !important;
+  }
+
+  .tool-controls-bar button {
+    flex: 1 1 calc(50% - 6px) !important;
+    justify-content: center !important;
+    text-align: center !important;
+    padding: 8px 10px !important;
+    font-size: 0.8rem !important;
+    white-space: nowrap !important;
+  }
+
+  .tool-controls-bar .btn-primary-sm {
+    flex: 1 1 100% !important;
+    padding: 9px 12px !important;
+    font-size: 0.84rem !important;
   }
 
   /* Exam Prep Card & Runner on Mobile */
@@ -3626,20 +3652,34 @@ button, input, select, textarea {
     width: 100%;
   }
 
-  /* Flashcards touch size */
+  /* Flashcards touch size & fitted text on mobile */
   .flashcard-card {
-    min-height: 220px;
-    padding: 24px 18px;
+    min-height: 190px !important;
+    padding: 18px 14px !important;
+    border-radius: 14px !important;
+    margin: 8px 0 !important;
+    word-break: break-word !important;
   }
 
   .flashcard-prompt-text {
-    font-size: 1.05rem;
+    font-size: 1rem !important;
+    line-height: 1.45 !important;
+  }
+
+  .flashcard-quote-box {
+    font-size: 0.78rem !important;
+    padding: 8px 10px !important;
+    margin-top: 10px !important;
+    line-height: 1.35 !important;
+    word-break: break-word !important;
   }
 
   .flashcard-controls {
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    gap: 8px !important;
   }
 
   /* Important areas on mobile */

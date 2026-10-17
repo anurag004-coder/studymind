@@ -6,6 +6,10 @@
   "routes": [
     { "src": "/static/index.css", "dest": "/index.css" },
     { "src": "/static/app.js", "dest": "/app.js" },
+    { "src": "/static/pdf.min.js", "dest": "/pdf.min.js" },
+    { "src": "/static/pdf.worker.min.js", "dest": "/pdf.worker.min.js" },
+    { "src": "/pdf.min.js", "dest": "/pdf.min.js" },
+    { "src": "/pdf.worker.min.js", "dest": "/pdf.worker.min.js" },
     { "src": "/app", "dest": "/index.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }

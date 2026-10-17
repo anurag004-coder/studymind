@@ -245,6 +245,59 @@ function saveDemoStoreToStorage() {
   }
 }
 
+// Text validation helper to detect and reject binary garbage, unmapped font glyphs, and mojibake
+function isValidHumanText(str) {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (trimmed.length < 3) return false;
+
+  // Count printable standard characters (alphanumeric, spaces, punctuation, common symbols)
+  const validChars = trimmed.match(/[a-zA-Z0-9\s.,?!:;'"()\[\]\-_/\\%&$#@+=*]/g);
+  const validCount = validChars ? validChars.length : 0;
+  const validRatio = validCount / trimmed.length;
+  if (validRatio < 0.70) return false;
+
+  // Check for excessive control codes or high-bit mojibake characters
+  const mojibakeChars = trimmed.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u00A0-\u00FF\u2200-\u22FF]/g);
+  if (mojibakeChars && (mojibakeChars.length / trimmed.length) > 0.10) {
+    return false;
+  }
+
+  // Must contain at least one plausible word of 2+ alphanumeric characters
+  const words = trimmed.split(/\s+/).filter((w) => /^[a-zA-Z0-9]{2,}$/.test(w));
+  return words.length >= 1;
+}
+
+function sanitizeCustomStore() {
+  let modified = false;
+  if (demoStore.customChunks) {
+    for (const wsId in demoStore.customChunks) {
+      const orig = demoStore.customChunks[wsId] || [];
+      const filtered = orig.filter((c) => c && c.text && isValidHumanText(c.text));
+      if (filtered.length !== orig.length) {
+        demoStore.customChunks[wsId] = filtered;
+        modified = true;
+      }
+    }
+  }
+  if (demoStore.customDocs) {
+    for (const docId in demoStore.customDocs) {
+      const doc = demoStore.customDocs[docId];
+      if (doc && doc.chunks) {
+        const orig = doc.chunks;
+        const filtered = orig.filter((c) => c && c.text && isValidHumanText(c.text));
+        if (filtered.length !== orig.length) {
+          doc.chunks = filtered;
+          modified = true;
+        }
+      }
+    }
+  }
+  if (modified) {
+    saveDemoStoreToStorage();
+  }
+}
+
 function loadDemoStoreFromStorage() {
   try {
     const raw = localStorage.getItem('studymind_demo_store_v1');
@@ -265,6 +318,8 @@ function loadDemoStoreFromStorage() {
         if (!ids.has(w.id)) demoStore.workspaces.push(w);
       });
     }
+    // Automatically purge any previously stored corrupt/mojibake chunks
+    sanitizeCustomStore();
   } catch (err) {
     console.warn('Failed to load demoStore from storage:', err);
   }
@@ -272,43 +327,39 @@ function loadDemoStoreFromStorage() {
 
 // Global helper to retrieve any and all uploaded custom chunks across workspaces
 function getAvailableChunks(wsId) {
+  let rawChunks = [];
   if (wsId && demoStore.customChunks?.[wsId]?.length > 0) {
-    return demoStore.customChunks[wsId];
-  }
-  if (state.currentWorkspaceId && demoStore.customChunks?.[state.currentWorkspaceId]?.length > 0) {
-    return demoStore.customChunks[state.currentWorkspaceId];
-  }
-  for (const k in demoStore.customChunks) {
-    if (demoStore.customChunks[k] && demoStore.customChunks[k].length > 0) {
-      return demoStore.customChunks[k];
+    rawChunks = demoStore.customChunks[wsId];
+  } else if (state.currentWorkspaceId && demoStore.customChunks?.[state.currentWorkspaceId]?.length > 0) {
+    rawChunks = demoStore.customChunks[state.currentWorkspaceId];
+  } else {
+    for (const k in demoStore.customChunks) {
+      if (demoStore.customChunks[k] && demoStore.customChunks[k].length > 0) {
+        rawChunks = demoStore.customChunks[k];
+        break;
+      }
     }
   }
-  if (demoStore.customDocs) {
-    const fromDocs = [];
+  if (rawChunks.length === 0 && demoStore.customDocs) {
     for (const dId in demoStore.customDocs) {
       const doc = demoStore.customDocs[dId];
       if (doc.chunks && doc.chunks.length > 0) {
-        fromDocs.push(...doc.chunks);
+        rawChunks.push(...doc.chunks);
       }
     }
-    if (fromDocs.length > 0) return fromDocs;
   }
-  return [];
+  // Filter out any garbage binary / corrupted chunks
+  return (rawChunks || []).filter((c) => c && c.text && isValidHumanText(c.text));
 }
 
 function setupPdfJsWorker() {
   if (typeof pdfjsLib === 'undefined') return;
   try {
-    if (!window.__pdfWorkerBlobUrl) {
-      const workerBlob = new Blob(
-        [`importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js');`],
-        { type: 'application/javascript' }
-      );
-      window.__pdfWorkerBlobUrl = URL.createObjectURL(workerBlob);
-    }
-    pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfWorkerBlobUrl;
+    const origin = window.location.origin;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${origin}/static/pdf.worker.min.js`;
   } catch (e) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 }
 
@@ -339,7 +390,7 @@ async function extractPdfDirectFallback(file, maybeArrayBuffer) {
     let match;
     while ((match = tjRegex.exec(text)) !== null) {
       const clean = match[1].replace(/\\([()\\])/g, '$1').trim();
-      if (clean.length > 2 && /[a-zA-Z0-9]/.test(clean)) {
+      if (clean.length > 3 && isValidHumanText(clean)) {
         extractedLines.push(clean);
       }
     }
@@ -352,90 +403,51 @@ async function extractPdfDirectFallback(file, maybeArrayBuffer) {
         const line = subMatches
           .map((s) => s.slice(1, -1).replace(/\\([()\\])/g, '$1').trim())
           .join(' ');
-        if (line.length > 2 && /[a-zA-Z0-9]/.test(line)) {
+        if (line.length > 3 && isValidHumanText(line)) {
           extractedLines.push(line);
         }
       }
     }
   }
 
+  // Convert only printable ASCII characters into binaryStr to prevent binary garbage injection
   let binaryStr = '';
   const len = bytes.byteLength;
-  const maxRead = Math.min(len, 3 * 1024 * 1024);
+  const maxRead = Math.min(len, 2 * 1024 * 1024);
   for (let i = 0; i < maxRead; i++) {
-    binaryStr += String.fromCharCode(bytes[i]);
-  }
-
-  // 1. Raw text extraction
-  extractLinesFromPdfText(binaryStr);
-
-  // 2. Stream decompression for Deflate (FlateDecode)
-  if (extractedLines.length < 5 && typeof DecompressionStream !== 'undefined') {
-    try {
-      const streamMarker = 'stream';
-      const endMarker = 'endstream';
-      let pos = 0;
-      let streamCount = 0;
-      while ((pos = binaryStr.indexOf(streamMarker, pos)) !== -1 && streamCount < 30) {
-        pos += streamMarker.length;
-        if (binaryStr.charCodeAt(pos) === 13) pos++;
-        if (binaryStr.charCodeAt(pos) === 10) pos++;
-        const endPos = binaryStr.indexOf(endMarker, pos);
-        if (endPos === -1) break;
-
-        const streamBytes = bytes.slice(pos, endPos);
-        if (streamBytes.length > 8) {
-          try {
-            const ds = new DecompressionStream('deflate');
-            const writer = ds.writable.getWriter();
-            writer.write(streamBytes);
-            writer.close();
-            const reader = ds.readable.getReader();
-            const chunks = [];
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              chunks.push(value);
-            }
-            const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-            const decompressed = new Uint8Array(totalLen);
-            let off = 0;
-            for (const c of chunks) {
-              decompressed.set(c, off);
-              off += c.length;
-            }
-            const decompressedStr = new TextDecoder('utf-8', { fatal: false }).decode(decompressed);
-            extractLinesFromPdfText(decompressedStr);
-          } catch (streamErr) {
-            // Not a deflate stream or partial block
-          }
-        }
-        pos = endPos + endMarker.length;
-        streamCount++;
-      }
-    } catch (e) {
-      console.warn('DecompressionStream error:', e);
+    const code = bytes[i];
+    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126)) {
+      binaryStr += String.fromCharCode(code);
+    } else {
+      binaryStr += ' ';
     }
   }
 
-  const rawText = extractedLines.length > 0
-    ? extractedLines.join('\n')
-    : `Uploaded Study Document: ${file.name}\nExtracted text stream from ${file.name}.`;
+  extractLinesFromPdfText(binaryStr);
 
-  const chunks = splitTextIntoChunks(rawText, 450, 60).map((text, idx) => ({
-    id: `chunk-fb-${idx}`,
-    page: 1,
-    text,
-    bbox: [0.08, 0.15, 0.92, 0.85],
-    bounding_box: [0.08, 0.15, 0.92, 0.85],
-  }));
+  const validExtracted = extractedLines.filter((l) => isValidHumanText(l));
+
+  if (validExtracted.length === 0) {
+    return { numPages: 1, pages: [], chunks: [] };
+  }
+
+  const rawText = validExtracted.join('\n');
+  const chunks = splitTextIntoChunks(rawText, 450, 60)
+    .filter((txt) => isValidHumanText(txt))
+    .map((text, idx) => ({
+      id: `chunk-fb-${idx}`,
+      page: 1,
+      text,
+      bbox: [0.08, 0.15, 0.92, 0.85],
+      bounding_box: [0.08, 0.15, 0.92, 0.85],
+    }));
 
   const pages = [
     {
       pageNo: 1,
-      image: generateTextPageSvg(file.name, 1, 1, extractedLines.slice(0, 30)),
+      image: generateTextPageSvg(file.name, 1, 1, validExtracted.slice(0, 30)),
       text: rawText,
-      lines: extractedLines.slice(0, 30),
+      lines: validExtracted.slice(0, 30),
       width: 600,
       height: 850,
     },
@@ -519,7 +531,6 @@ async function extractPdfClientSide(file) {
       const clonedData = new Uint8Array(freshBuffer.slice(0));
       const loadingTask = pdfjsLib.getDocument({
         data: clonedData,
-        disableWorker: true, // Prevents cross-origin worker sandbox termination on mobile Chrome!
         useWorkerFetch: false,
         isEvalSupported: false,
         useSystemFonts: true,
@@ -549,15 +560,15 @@ async function extractPdfClientSide(file) {
           for (const y of sortedY) {
             const sortedX = lineBuckets[y].sort((a, b) => a.transform[4] - b.transform[4]);
             const lineText = sortedX.map((it) => it.str).join(' ').trim();
-            if (lineText) lines.push(lineText);
+            if (lineText && isValidHumanText(lineText)) lines.push(lineText);
           }
           fullPageText = lines.join('\n');
         } catch (textErr) {
           console.warn(`TextContent extraction error on page ${pageNo}:`, textErr);
         }
 
-        if (fullPageText.trim().length > 0) {
-          const pageChunks = splitTextIntoChunks(fullPageText, 450, 60);
+        if (fullPageText.trim().length > 0 && isValidHumanText(fullPageText)) {
+          const pageChunks = splitTextIntoChunks(fullPageText, 450, 60).filter((txt) => isValidHumanText(txt));
           const nChunks = Math.max(1, pageChunks.length);
           pageChunks.forEach((chunkText, cIdx) => {
             const yStart = 0.08 + (cIdx / nChunks) * 0.78;
@@ -1116,10 +1127,11 @@ function generateDynamicFlashcards(wsId, count = 5) {
 
   const allStatements = [];
   customChunks.forEach((chunk) => {
+    if (!chunk || !chunk.text || !isValidHumanText(chunk.text)) return;
     const lines = chunk.text
       .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
       .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-      .filter((s) => s.length >= 20 && s.length <= 260);
+      .filter((s) => s.length >= 20 && s.length <= 260 && isValidHumanText(s));
 
     lines.forEach((stmt) => {
       allStatements.push({
@@ -1137,6 +1149,7 @@ function generateDynamicFlashcards(wsId, count = 5) {
   for (const item of allStatements) {
     if (cards.length >= count) break;
     const clean = item.statement;
+    if (!isValidHumanText(clean)) continue;
 
     let q = '';
     let a = '';
@@ -2026,8 +2039,14 @@ async function handleMultipleFiles(files) {
 
       const docId = 'doc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
       const numPages = parsedDoc ? parsedDoc.numPages : 1;
-      const chunks = parsedDoc ? parsedDoc.chunks : [];
+      const rawChunks = parsedDoc ? parsedDoc.chunks : [];
+      const chunks = (rawChunks || []).filter((c) => c && c.text && isValidHumanText(c.text));
       const pages = parsedDoc ? parsedDoc.pages : [];
+
+      if (chunks.length === 0) {
+        showToast(`No readable text could be extracted from "${file.name}". Please upload a notes document with selectable text.`, 'warning');
+        return;
+      }
 
       // Store in memory stores
       if (!demoStore.customDocs) demoStore.customDocs = {};
@@ -3893,9 +3912,23 @@ function renderFlashcardCard() {
   const container = document.getElementById('flashcards-output-container');
   if (!container) return;
 
+  // Automatically filter out any corrupted or mojibake cards
+  currentFlashcardsList = (currentFlashcardsList || []).filter(
+    (c) => c && isValidHumanText(c.question) && isValidHumanText(c.answer)
+  );
+
   if (currentFlashcardsList.length === 0) {
-    container.innerHTML = '<div class="tool-placeholder">No flashcards generated yet.</div>';
-    return;
+    if (demoStore.flashcards && demoStore.flashcards.length > 0) {
+      currentFlashcardsList = [...demoStore.flashcards];
+      currentFlashcardIndex = 0;
+    } else {
+      container.innerHTML = '<div class="tool-placeholder">No flashcards generated yet. Upload course notes or click Generate More Cards.</div>';
+      return;
+    }
+  }
+
+  if (currentFlashcardIndex >= currentFlashcardsList.length) {
+    currentFlashcardIndex = Math.max(0, currentFlashcardsList.length - 1);
   }
 
   const card = currentFlashcardsList[currentFlashcardIndex];
