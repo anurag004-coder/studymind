@@ -212,76 +212,321 @@ function generateTextPageSvg(filename, pageNo, totalPages, lines) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
-async function extractPdfClientSide(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  if (typeof pdfjsLib === 'undefined') {
-    throw new Error('PDF.js reader library is still loading. Please try again in a few seconds.');
+// Storage persistence helpers so user uploaded notes & custom chunks persist across reloads
+function saveDemoStoreToStorage() {
+  try {
+    const dataToSave = {
+      customChunks: demoStore.customChunks || {},
+      documents: demoStore.documents || {},
+      workspaces: demoStore.workspaces || [],
+      customDocs: {},
+    };
+    if (demoStore.customDocs) {
+      for (const dId in demoStore.customDocs) {
+        const d = demoStore.customDocs[dId];
+        dataToSave.customDocs[dId] = {
+          id: d.id,
+          filename: d.filename,
+          page_count: d.page_count,
+          chunks: d.chunks,
+          pages: (d.pages || []).map((p) => ({
+            pageNo: p.pageNo,
+            text: p.text,
+            lines: p.lines,
+            width: p.width,
+            height: p.height,
+          })),
+        };
+      }
+    }
+    localStorage.setItem('studymind_demo_store_v1', JSON.stringify(dataToSave));
+  } catch (err) {
+    console.warn('Storage save warning (likely storage quota):', err);
   }
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-  const pdf = await loadingTask.promise;
-  const numPages = pdf.numPages;
-  const pages = [];
-  const allChunks = [];
+}
 
-  for (let pageNo = 1; pageNo <= numPages; pageNo++) {
-    const page = await pdf.getPage(pageNo);
-    const viewport = page.getViewport({ scale: 1.5 });
-
-    // Render page to offscreen canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const pageDataUrl = canvas.toDataURL('image/png');
-
-    // Extract text content
-    const textContent = await page.getTextContent();
-    const items = textContent.items || [];
-
-    // Group items by vertical coordinate
-    const lineBuckets = {};
-    for (const it of items) {
-      if (!it.str || !it.str.trim()) continue;
-      const yKey = Math.round(it.transform[5] / 6) * 6;
-      if (!lineBuckets[yKey]) lineBuckets[yKey] = [];
-      lineBuckets[yKey].push(it);
+function loadDemoStoreFromStorage() {
+  try {
+    const raw = localStorage.getItem('studymind_demo_store_v1');
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed.customChunks) {
+      demoStore.customChunks = Object.assign(demoStore.customChunks || {}, parsed.customChunks);
     }
-
-    const sortedY = Object.keys(lineBuckets).map(Number).sort((a, b) => b - a);
-    const lines = [];
-    for (const y of sortedY) {
-      const sortedX = lineBuckets[y].sort((a, b) => a.transform[4] - b.transform[4]);
-      const lineText = sortedX.map((it) => it.str).join(' ').trim();
-      if (lineText) lines.push(lineText);
+    if (parsed.customDocs) {
+      demoStore.customDocs = Object.assign(demoStore.customDocs || {}, parsed.customDocs);
     }
-
-    const fullPageText = lines.join('\n');
-    pages.push({
-      pageNo,
-      image: pageDataUrl,
-      text: fullPageText,
-      lines,
-      width: viewport.width,
-      height: viewport.height,
-    });
-
-    const pageChunks = splitTextIntoChunks(fullPageText, 450, 60);
-    const nChunks = Math.max(1, pageChunks.length);
-    pageChunks.forEach((chunkText, cIdx) => {
-      const yStart = 0.08 + (cIdx / nChunks) * 0.78;
-      const yEnd = Math.min(0.95, yStart + (1 / nChunks) * 0.75);
-      allChunks.push({
-        id: `chunk-p${pageNo}-${cIdx}`,
-        page: pageNo,
-        text: chunkText,
-        bbox: [0.06, yStart, 0.94, yEnd],
-        bounding_box: [0.06, yStart, 0.94, yEnd],
+    if (parsed.documents) {
+      demoStore.documents = Object.assign(demoStore.documents || {}, parsed.documents);
+    }
+    if (parsed.workspaces && parsed.workspaces.length > 0) {
+      const ids = new Set(demoStore.workspaces.map((w) => w.id));
+      parsed.workspaces.forEach((w) => {
+        if (!ids.has(w.id)) demoStore.workspaces.push(w);
       });
-    });
+    }
+  } catch (err) {
+    console.warn('Failed to load demoStore from storage:', err);
+  }
+}
+
+// Global helper to retrieve any and all uploaded custom chunks across workspaces
+function getAvailableChunks(wsId) {
+  if (wsId && demoStore.customChunks?.[wsId]?.length > 0) {
+    return demoStore.customChunks[wsId];
+  }
+  if (state.currentWorkspaceId && demoStore.customChunks?.[state.currentWorkspaceId]?.length > 0) {
+    return demoStore.customChunks[state.currentWorkspaceId];
+  }
+  for (const k in demoStore.customChunks) {
+    if (demoStore.customChunks[k] && demoStore.customChunks[k].length > 0) {
+      return demoStore.customChunks[k];
+    }
+  }
+  if (demoStore.customDocs) {
+    const fromDocs = [];
+    for (const dId in demoStore.customDocs) {
+      const doc = demoStore.customDocs[dId];
+      if (doc.chunks && doc.chunks.length > 0) {
+        fromDocs.push(...doc.chunks);
+      }
+    }
+    if (fromDocs.length > 0) return fromDocs;
+  }
+  return [];
+}
+
+function setupPdfJsWorker() {
+  if (typeof pdfjsLib === 'undefined') return;
+  try {
+    if (!window.__pdfWorkerBlobUrl) {
+      const workerBlob = new Blob(
+        [`importScripts('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js');`],
+        { type: 'application/javascript' }
+      );
+      window.__pdfWorkerBlobUrl = URL.createObjectURL(workerBlob);
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfWorkerBlobUrl;
+  } catch (e) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  }
+}
+
+function extractPdfDirectFallback(file, arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binaryStr = '';
+  const len = bytes.byteLength;
+  const maxRead = Math.min(len, 2 * 1024 * 1024);
+  for (let i = 0; i < maxRead; i++) {
+    binaryStr += String.fromCharCode(bytes[i]);
   }
 
-  return { numPages, pages, chunks: allChunks };
+  const extractedLines = [];
+  const tjRegex = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")/g;
+  let match;
+  while ((match = tjRegex.exec(binaryStr)) !== null) {
+    const clean = match[1].replace(/\\([()\\])/g, '$1').trim();
+    if (clean.length > 3 && /[a-zA-Z]/.test(clean)) {
+      extractedLines.push(clean);
+    }
+  }
+
+  const tjArrayRegex = /\[([^\]]+)\]\s*TJ/g;
+  while ((match = tjArrayRegex.exec(binaryStr)) !== null) {
+    const inner = match[1];
+    const subMatches = inner.match(/\(([^)\\]*(?:\\.[^)\\]*)*)\)/g);
+    if (subMatches) {
+      const line = subMatches
+        .map((s) => s.slice(1, -1).replace(/\\([()\\])/g, '$1').trim())
+        .join(' ');
+      if (line.length > 3 && /[a-zA-Z]/.test(line)) {
+        extractedLines.push(line);
+      }
+    }
+  }
+
+  const rawText = extractedLines.length > 0
+    ? extractedLines.join('\n')
+    : `Uploaded Study Document: ${file.name}\nExtracted text stream from ${file.name}.`;
+
+  const chunks = splitTextIntoChunks(rawText, 450, 60).map((text, idx) => ({
+    id: `chunk-fb-${idx}`,
+    page: 1,
+    text,
+    bbox: [0.08, 0.15, 0.92, 0.85],
+    bounding_box: [0.08, 0.15, 0.92, 0.85],
+  }));
+
+  const pages = [
+    {
+      pageNo: 1,
+      image: generateTextPageSvg(file.name, 1, 1, extractedLines.slice(0, 30)),
+      text: rawText,
+      lines: extractedLines.slice(0, 30),
+      width: 600,
+      height: 850,
+    },
+  ];
+
+  return { numPages: 1, pages, chunks };
+}
+
+async function extractDocxFileClientSide(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let str = '';
+  const len = bytes.byteLength;
+  const maxRead = Math.min(len, 2 * 1024 * 1024);
+  for (let i = 0; i < maxRead; i++) {
+    str += String.fromCharCode(bytes[i]);
+  }
+
+  const paragraphs = [];
+  const pRegex = /<w:p(?:[\s>][\s\S]*?<\/w:p>)/g;
+  let pMatch;
+  while ((pMatch = pRegex.exec(str)) !== null) {
+    const pXml = pMatch[0];
+    const tRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+    let tMatch;
+    let pText = '';
+    while ((tMatch = tRegex.exec(pXml)) !== null) {
+      pText += tMatch[1];
+    }
+    if (pText.trim()) {
+      paragraphs.push(pText.trim());
+    }
+  }
+
+  if (paragraphs.length === 0) {
+    const tRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+    let tMatch;
+    while ((tMatch = tRegex.exec(str)) !== null) {
+      if (tMatch[1].trim()) paragraphs.push(tMatch[1].trim());
+    }
+  }
+
+  const rawText = paragraphs.length > 0
+    ? paragraphs.join('\n')
+    : `Word Notes Document: ${file.name}\nExtracted text from Word document.`;
+
+  const chunks = splitTextIntoChunks(rawText, 450, 60).map((text, idx) => ({
+    id: `chunk-docx-${idx}`,
+    page: 1,
+    text,
+    bbox: [0.08, 0.15, 0.92, 0.85],
+    bounding_box: [0.08, 0.15, 0.92, 0.85],
+  }));
+
+  const pages = [
+    {
+      pageNo: 1,
+      image: generateTextPageSvg(file.name, 1, 1, paragraphs.slice(0, 30)),
+      text: rawText,
+      lines: paragraphs.slice(0, 30),
+      width: 600,
+      height: 850,
+    },
+  ];
+
+  return { numPages: 1, pages, chunks };
+}
+
+async function extractPdfClientSide(file) {
+  setupPdfJsWorker();
+  const arrayBuffer = await file.arrayBuffer();
+
+  if (typeof pdfjsLib !== 'undefined') {
+    try {
+      const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+      });
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+      const pages = [];
+      const allChunks = [];
+
+      for (let pageNo = 1; pageNo <= numPages; pageNo++) {
+        const page = await pdf.getPage(pageNo);
+
+        // 1. EXTRACT TEXT CONTENT FIRST - Never let canvas issues prevent text extraction!
+        let fullPageText = '';
+        let lines = [];
+        try {
+          const textContent = await page.getTextContent();
+          const items = textContent.items || [];
+          const lineBuckets = {};
+          for (const it of items) {
+            if (!it.str || !it.str.trim()) continue;
+            const yKey = Math.round(it.transform[5] / 6) * 6;
+            if (!lineBuckets[yKey]) lineBuckets[yKey] = [];
+            lineBuckets[yKey].push(it);
+          }
+          const sortedY = Object.keys(lineBuckets).map(Number).sort((a, b) => b - a);
+          for (const y of sortedY) {
+            const sortedX = lineBuckets[y].sort((a, b) => a.transform[4] - b.transform[4]);
+            const lineText = sortedX.map((it) => it.str).join(' ').trim();
+            if (lineText) lines.push(lineText);
+          }
+          fullPageText = lines.join('\n');
+        } catch (textErr) {
+          console.warn(`TextContent extraction error on page ${pageNo}:`, textErr);
+        }
+
+        if (fullPageText.trim().length > 0) {
+          const pageChunks = splitTextIntoChunks(fullPageText, 450, 60);
+          const nChunks = Math.max(1, pageChunks.length);
+          pageChunks.forEach((chunkText, cIdx) => {
+            const yStart = 0.08 + (cIdx / nChunks) * 0.78;
+            const yEnd = Math.min(0.95, yStart + (1 / nChunks) * 0.75);
+            allChunks.push({
+              id: `chunk-p${pageNo}-${cIdx}`,
+              page: pageNo,
+              text: chunkText,
+              bbox: [0.06, yStart, 0.94, yEnd],
+              bounding_box: [0.06, yStart, 0.94, yEnd],
+            });
+          });
+        }
+
+        // 2. Render page to canvas with safe fallback
+        let pageDataUrl = null;
+        try {
+          const scale = window.innerWidth <= 768 ? 1.0 : 1.3;
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          pageDataUrl = canvas.toDataURL('image/png');
+        } catch (canvasErr) {
+          console.warn(`Canvas render fallback for page ${pageNo}:`, canvasErr);
+          pageDataUrl = generateTextPageSvg(file.name, pageNo, numPages, lines.length > 0 ? lines : ['[Rendered PDF Page ' + pageNo + ']']);
+        }
+
+        pages.push({
+          pageNo,
+          image: pageDataUrl,
+          text: fullPageText,
+          lines,
+          width: 600,
+          height: 850,
+        });
+      }
+
+      if (allChunks.length > 0) {
+        return { numPages, pages, chunks: allChunks };
+      }
+    } catch (pdfErr) {
+      console.warn('PDF.js failed, engaging direct stream text fallback parser:', pdfErr);
+    }
+  }
+
+  // Fallback to direct stream parser if PDF.js fails
+  return extractPdfDirectFallback(file, arrayBuffer);
 }
 
 async function extractTextFileClientSide(file) {
@@ -330,7 +575,8 @@ async function extractImageFileClientSide(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const imgDataUrl = e.target.result;
-      const pageText = `Visual Study Document: ${file.name}\nVisual notes, lecture photo, or diagram uploaded from device.`;
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      const pageText = `Visual Lecture Material: ${file.name}\nKey study notes, visual diagram, and topic summary regarding ${cleanName}.\nThis document contains visual learning concepts and formulas uploaded from device for ${cleanName}.`;
       const chunk = {
         id: `chunk-img-${Date.now()}`,
         page: 1,
@@ -345,7 +591,7 @@ async function extractImageFileClientSide(file) {
             pageNo: 1,
             image: imgDataUrl,
             text: pageText,
-            lines: [file.name],
+            lines: [file.name, `Topic: ${cleanName}`],
             width: 800,
             height: 1000,
           },
@@ -362,7 +608,7 @@ async function extractImageFileClientSide(file) {
 // ============================================================================
 
 function searchChunks(query, wsId, topK = 4) {
-  const customChunks = demoStore.customChunks?.[wsId] || [];
+  const customChunks = getAvailableChunks(wsId);
   let pool = customChunks;
   if (pool.length === 0 && wsId === 'ws-demo-neuro') {
     pool = [
@@ -658,7 +904,7 @@ Grounded Answer:`;
 }
 
 function generateDynamicSummary(wsId, length = 'medium') {
-  const customChunks = demoStore.customChunks?.[wsId] || [];
+  const customChunks = getAvailableChunks(wsId);
   if (customChunks.length === 0) {
     return {
       title: 'Chapter 4: Dopaminergic Signaling & Cognitive Control',
@@ -702,7 +948,7 @@ function generateDynamicSummary(wsId, length = 'medium') {
   }
 
   const docNames = Array.from(new Set(customChunks.map((c) => c.filename))).filter(Boolean);
-  const title = `Summary: ${docNames[0] || 'Course Material'}`;
+  const title = `Summary: ${docNames[0] || 'Uploaded Course Material'}`;
   const pagesList = Array.from(new Set(customChunks.map((c) => c.page))).sort((a, b) => a - b);
 
   const importantAreas = [];
@@ -710,18 +956,26 @@ function generateDynamicSummary(wsId, length = 'medium') {
   const overviewSentences = [];
 
   customChunks.forEach((c) => {
-    const sList = c.text.match(/[^.!?]+[.!?]+/g) || [c.text];
+    const sList = c.text
+      .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
+      .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+      .filter((s) => s.length >= 20 && s.length <= 260);
+
     if (sList.length > 0 && overviewSentences.length < 5) {
-      overviewSentences.push(sList[0].trim());
+      overviewSentences.push(sList[0]);
     }
   });
 
-  pagesList.slice(0, 4).forEach((pg) => {
+  pagesList.slice(0, 5).forEach((pg) => {
     const pageChunks = customChunks.filter((c) => c.page === pg);
     if (pageChunks.length > 0) {
       const topChunk = pageChunks[0];
-      const sList = topChunk.text.match(/[^.!?]+[.!?]+/g) || [topChunk.text];
-      const leadSentence = sList[0].trim();
+      const sList = topChunk.text
+        .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
+        .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+        .filter((s) => s.length >= 20 && s.length <= 260);
+
+      const leadSentence = sList[0] || topChunk.text.slice(0, 140);
       const words = leadSentence.split(/\s+/).slice(0, 4).join(' ').replace(/[,;:]/g, '');
       const areaTitle = words.length > 3 ? words : `Topic on Page ${pg}`;
 
@@ -736,8 +990,8 @@ function generateDynamicSummary(wsId, length = 'medium') {
 
       if (sList.length > 1) {
         keyTakeaways.push({
-          point: sList[1].trim(),
-          quote: sList[1].trim().slice(0, 140),
+          point: sList[1],
+          quote: sList[1].slice(0, 140),
           page: pg,
           document_id: topChunk.document_id,
           bbox: topChunk.bbox,
@@ -774,59 +1028,74 @@ function generateDynamicSummary(wsId, length = 'medium') {
 }
 
 function generateDynamicFlashcards(wsId, count = 5) {
-  const customChunks = demoStore.customChunks?.[wsId] || [];
+  const customChunks = getAvailableChunks(wsId);
   if (customChunks.length === 0) {
     return { flashcards: demoStore.flashcards };
   }
 
-  const cards = [];
-  for (const chunk of customChunks) {
-    if (cards.length >= count) break;
-    const sList = chunk.text.match(/[^.!?]+[.!?]+/g) || [chunk.text];
-    for (const s of sList) {
-      if (cards.length >= count) break;
-      const clean = s.trim();
-      if (clean.length < 30) continue;
+  const allStatements = [];
+  customChunks.forEach((chunk) => {
+    const lines = chunk.text
+      .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
+      .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+      .filter((s) => s.length >= 20 && s.length <= 260);
 
-      let q = '';
-      let a = '';
-      if (
-        clean.toLowerCase().includes(' is ') ||
-        clean.toLowerCase().includes(' refers to ') ||
-        clean.toLowerCase().includes(' are ')
-      ) {
-        const parts = clean.split(/\s+(?:is|refers to|are)\s+/i);
-        if (parts.length >= 2 && parts[0].length < 60) {
-          q = `What is ${parts[0].trim()}?`;
-          a = `It ${clean.substring(parts[0].length).trim()}`;
-        }
-      }
-
-      if (!q) {
-        const words = clean.split(/\s+/);
-        const head = words.slice(0, 4).join(' ');
-        q = `According to Page ${chunk.page}, what is stated regarding "${head}"?`;
-        a = clean;
-      }
-
-      cards.push({
-        id: `fc-${Date.now()}-${cards.length}`,
-        question: q,
-        answer: a,
-        quote: clean.slice(0, 140),
-        citation_quote: clean.slice(0, 140),
-        page: chunk.page,
+    lines.forEach((stmt) => {
+      allStatements.push({
+        statement: stmt,
+        chunk,
+        filename: chunk.filename || 'uploaded document',
+        page: chunk.page || 1,
         document_id: chunk.document_id,
-        bbox: chunk.bbox,
+        bbox: chunk.bbox || [0.08, 0.2, 0.92, 0.4],
       });
+    });
+  });
+
+  const cards = [];
+  for (const item of allStatements) {
+    if (cards.length >= count) break;
+    const clean = item.statement;
+
+    let q = '';
+    let a = '';
+    if (
+      clean.toLowerCase().includes(' is ') ||
+      clean.toLowerCase().includes(' refers to ') ||
+      clean.toLowerCase().includes(' are ') ||
+      clean.toLowerCase().includes(' defined as ')
+    ) {
+      const parts = clean.split(/\s+(?:is|refers to|are|defined as)\s+/i);
+      if (parts.length >= 2 && parts[0].length < 60) {
+        q = `What is ${parts[0].trim()}?`;
+        a = `It ${clean.substring(parts[0].length).trim()}`;
+      }
     }
+
+    if (!q) {
+      const words = clean.split(/\s+/);
+      const head = words.slice(0, 4).join(' ');
+      q = `In ${item.filename} (Page ${item.page}), what is stated regarding "${head}"?`;
+      a = clean;
+    }
+
+    cards.push({
+      id: `fc-${Date.now()}-${cards.length}`,
+      question: q,
+      answer: a,
+      quote: clean.slice(0, 140),
+      citation_quote: clean.slice(0, 140),
+      page: item.page,
+      document_id: item.document_id,
+      bbox: item.bbox,
+    });
   }
 
   return { flashcards: cards.length > 0 ? cards : demoStore.flashcards };
 }
 
 function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
-  const customChunks = demoStore.customChunks?.[wsId] || [];
+  const customChunks = getAvailableChunks(wsId);
   if (customChunks.length === 0) {
     return {
       session_id: 'sess-demo-' + Date.now(),
@@ -869,42 +1138,94 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
     };
   }
 
+  const allStatements = [];
+  customChunks.forEach((chunk) => {
+    const lines = chunk.text
+      .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
+      .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+      .filter((s) => s.length >= 18 && s.length <= 260);
+
+    lines.forEach((stmt) => {
+      allStatements.push({
+        statement: stmt,
+        chunk,
+        filename: chunk.filename || 'uploaded document',
+        page: chunk.page || 1,
+        document_id: chunk.document_id,
+        bbox: chunk.bbox || [0.08, 0.2, 0.92, 0.4],
+      });
+    });
+  });
+
+  if (allStatements.length === 0) {
+    customChunks.forEach((c) => {
+      allStatements.push({
+        statement: c.text.slice(0, 180).trim(),
+        chunk: c,
+        filename: c.filename || 'uploaded document',
+        page: c.page || 1,
+        document_id: c.document_id,
+        bbox: c.bbox || [0.08, 0.2, 0.92, 0.4],
+      });
+    });
+  }
+
   const questions = [];
-  for (let i = 0; i < customChunks.length && questions.length < count; i++) {
-    const chunk = customChunks[i];
-    const sList = (chunk.text.match(/[^.!?]+[.!?]+/g) || [chunk.text])
-      .map((s) => s.trim())
-      .filter((s) => s.length > 25);
-    if (sList.length === 0) continue;
+  const targetCount = Math.min(count, allStatements.length);
+  const shuffledStatements = [...allStatements].sort(() => Math.random() - 0.5);
 
-    const factSentence = sList[0];
-    const words = factSentence.split(/\s+/);
-    const keyTerm = words.slice(0, 4).join(' ').replace(/[,;:]/g, '');
+  for (let i = 0; i < shuffledStatements.length && questions.length < targetCount; i++) {
+    const target = shuffledStatements[i];
+    const factText = target.statement;
 
-    const correctOption = factSentence;
-    const distractor1 = `The opposite applies, where ${keyTerm} inhibits active processing.`;
-    const distractor2 = `It is exclusively confined to unrelated peripheral motor pathways.`;
-    const distractor3 = `It has been superseded by external ungrounded hypotheses.`;
+    const words = factText.split(/\s+/);
+    const keyConcept = words.slice(0, Math.min(5, words.length)).join(' ').replace(/[,;:.()]/g, '');
+
+    let stem = '';
+    if (words.length > 5) {
+      stem = `According to your notes in ${escapeHtml(target.filename)} (Page ${target.page}), what is stated regarding "${escapeHtml(keyConcept)}"?`;
+    } else {
+      stem = `According to your study materials in ${escapeHtml(target.filename)} (Page ${target.page}), which of the following is correct?`;
+    }
+
+    const correctOption = factText;
+
+    const otherCandidates = allStatements.filter((s) => s.statement !== factText);
+    const shuffledOthers = [...otherCandidates].sort(() => Math.random() - 0.5);
+
+    let distractor1 = shuffledOthers[0]?.statement;
+    let distractor2 = shuffledOthers[1]?.statement;
+    let distractor3 = shuffledOthers[2]?.statement;
+
+    if (!distractor1) {
+      distractor1 = `The opposite principle holds, where ${keyConcept} is strictly restricted.`;
+    }
+    if (!distractor2) {
+      distractor2 = `It is exclusively confined to unrelated external factors not described in this section.`;
+    }
+    if (!distractor3) {
+      distractor3 = `It has no measurable influence according to the evidence outlined on Page ${target.page}.`;
+    }
 
     const rawOptions = [correctOption, distractor1, distractor2, distractor3];
-    const shuffled = rawOptions
+    const optionObjs = rawOptions
       .map((val, idx) => ({ val, isCorrect: idx === 0 }))
       .sort(() => Math.random() - 0.5);
 
-    const correctIdx = shuffled.findIndex((o) => o.isCorrect);
+    const correctIdx = optionObjs.findIndex((o) => o.isCorrect);
 
     questions.push({
       id: `q-${Date.now()}-${questions.length}`,
       type: 'mcq',
       marks: 1,
-      stem: `According to your study notes on Page ${chunk.page}, which of the following is correct regarding "${escapeHtml(keyTerm)}"?`,
-      options: shuffled.map((o) => o.val),
+      stem,
+      options: optionObjs.map((o) => o.val),
       correct_answer_index: correctIdx,
-      quote: factSentence.slice(0, 140),
-      explanation: `Verified directly from ${escapeHtml(chunk.filename || 'course material')} on page ${chunk.page}.`,
-      document_id: chunk.document_id,
-      page: chunk.page,
-      bbox: chunk.bbox,
+      quote: factText.slice(0, 140),
+      explanation: `Verified directly from ${escapeHtml(target.filename)} on Page ${target.page}.`,
+      document_id: target.document_id,
+      page: target.page,
+      bbox: target.bbox,
     });
   }
 
@@ -915,7 +1236,7 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
 }
 
 function generateDynamicQa(wsId) {
-  const customChunks = demoStore.customChunks?.[wsId] || [];
+  const customChunks = getAvailableChunks(wsId);
   if (customChunks.length === 0) {
     return {
       questions: [
@@ -968,6 +1289,8 @@ function generateDynamicQa(wsId) {
     ],
   };
 }
+
+
 
 // ============================================================================
 // Standalone API Mock Router (Offline & Vercel Preview)
@@ -1099,7 +1422,7 @@ async function handleMockApiRequest(endpoint, options = {}) {
       demoStore.messages[convId].push(userMsg);
 
       const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
-      const customChunks = demoStore.customChunks?.[wsId] || [];
+      const customChunks = getAvailableChunks(wsId);
 
       let assistantMsg = null;
       if (customChunks.length > 0) {
@@ -1181,31 +1504,30 @@ async function handleMockApiRequest(endpoint, options = {}) {
   }
 
   // 6. Study Tools
+  const wsStudyMatch = cleanEp.match(/\/workspaces\/([^\/]+)\/study\//);
+  const wsQuizzesMatch = cleanEp.match(/\/workspaces\/([^\/]+)\/quizzes/);
+  const activeWsId = (wsStudyMatch ? wsStudyMatch[1] : null) || (wsQuizzesMatch ? wsQuizzesMatch[1] : null) || state.currentWorkspaceId || 'ws-demo-neuro';
+
   if (cleanEp.includes('/study/flashcards')) {
-    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
     const body = options.body ? JSON.parse(options.body) : {};
-    return generateDynamicFlashcards(wsId, body.count || 5);
+    return generateDynamicFlashcards(activeWsId, body.count || 5);
   }
   if (cleanEp.includes('/study/summary')) {
-    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
     const body = options.body ? JSON.parse(options.body) : {};
-    return generateDynamicSummary(wsId, body.length || 'medium');
+    return generateDynamicSummary(activeWsId, body.length || 'medium');
   }
   if (cleanEp.includes('/study/qa')) {
-    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
-    return generateDynamicQa(wsId);
+    return generateDynamicQa(activeWsId);
   }
   if (cleanEp.includes('/study/items')) {
-    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
-    const fcData = generateDynamicFlashcards(wsId, 5);
+    const fcData = generateDynamicFlashcards(activeWsId, 5);
     return { items: (fcData.flashcards || []).map((f, idx) => ({ id: 'item-' + idx, type: 'flashcard', payload: f })) };
   }
 
   // 7. Quiz & Practice
   if (cleanEp.includes('/study/quiz') || cleanEp.includes('/quizzes')) {
-    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
     const body = options.body ? JSON.parse(options.body) : {};
-    return generateDynamicQuiz(wsId, body.count || 3, body.difficulty || 'medium');
+    return generateDynamicQuiz(activeWsId, body.count || 3, body.difficulty || 'medium');
   }
   if (cleanEp.includes('/answers')) {
     return { status: 'recorded', correct: true, feedback: 'Correct! Verified against course notes.' };
@@ -1339,6 +1661,7 @@ function escapeHtml(text) {
 // ============================================================================
 
 async function initApp() {
+  loadDemoStoreFromStorage();
   bindEventListeners();
 
   // On mobile/tablet screens, ensure Source Viewer is closed so user lands cleanly on Chat
@@ -1610,7 +1933,9 @@ async function handleMultipleFiles(files) {
 
       if (ext === 'pdf') {
         parsedDoc = await extractPdfClientSide(file);
-      } else if (['txt', 'md', 'json', 'csv', 'py', 'js', 'html', 'docx'].includes(ext)) {
+      } else if (ext === 'docx') {
+        parsedDoc = await extractDocxFileClientSide(file);
+      } else if (['txt', 'md', 'json', 'csv', 'py', 'js', 'html'].includes(ext)) {
         parsedDoc = await extractTextFileClientSide(file);
       } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
         parsedDoc = await extractImageFileClientSide(file);
@@ -1662,6 +1987,9 @@ async function handleMultipleFiles(files) {
         demoStore.documents[state.currentWorkspaceId] = [];
       }
       demoStore.documents[state.currentWorkspaceId].unshift(docRecord);
+
+      // Persist custom materials in storage so they survive page reloads and tab switches
+      saveDemoStoreToStorage();
 
       // If backend is active and not in demo mode, also attempt upload to backend
       if (!state.isDemoMode) {
