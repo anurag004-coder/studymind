@@ -291,6 +291,18 @@ function sanitizeCustomStore() {
           modified = true;
         }
       }
+      if (!doc || !doc.chunks || doc.chunks.length === 0) {
+        delete demoStore.customDocs[docId];
+        if (demoStore.customPageImages) {
+          delete demoStore.customPageImages[docId];
+        }
+        modified = true;
+        if (demoStore.documents) {
+          for (const ws in demoStore.documents) {
+            demoStore.documents[ws] = (demoStore.documents[ws] || []).filter((d) => d.id !== docId);
+          }
+        }
+      }
     }
   }
   if (modified) {
@@ -776,11 +788,12 @@ function isMarksQuery(query) {
 
 function generateMarksQa(chunks, docName) {
   const sentences = [];
-  chunks.forEach((c) => {
+  (chunks || []).forEach((c) => {
+    if (!c || !c.text || !isValidHumanText(c.text)) return;
     const sList = c.text.match(/[^.!?]+[.!?]+/g) || [c.text];
     sList.forEach((s) => {
       const clean = s.trim();
-      if (clean.length > 25) {
+      if (clean.length > 25 && isValidHumanText(clean)) {
         sentences.push({ text: clean, chunk: c });
       }
     });
@@ -1048,10 +1061,11 @@ function generateDynamicSummary(wsId, length = 'medium') {
   const overviewSentences = [];
 
   customChunks.forEach((c) => {
+    if (!c || !c.text || !isValidHumanText(c.text)) return;
     const sList = c.text
       .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
       .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-      .filter((s) => s.length >= 20 && s.length <= 260);
+      .filter((s) => s.length >= 20 && s.length <= 260 && isValidHumanText(s));
 
     if (sList.length > 0 && overviewSentences.length < 5) {
       overviewSentences.push(sList[0]);
@@ -1059,15 +1073,16 @@ function generateDynamicSummary(wsId, length = 'medium') {
   });
 
   pagesList.slice(0, 5).forEach((pg) => {
-    const pageChunks = customChunks.filter((c) => c.page === pg);
+    const pageChunks = customChunks.filter((c) => c.page === pg && isValidHumanText(c.text));
     if (pageChunks.length > 0) {
       const topChunk = pageChunks[0];
       const sList = topChunk.text
         .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
         .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-        .filter((s) => s.length >= 20 && s.length <= 260);
+        .filter((s) => s.length >= 20 && s.length <= 260 && isValidHumanText(s));
 
-      const leadSentence = sList[0] || topChunk.text.slice(0, 140);
+      const leadSentence = sList[0] || (isValidHumanText(topChunk.text) ? topChunk.text.slice(0, 140) : '');
+      if (!leadSentence || !isValidHumanText(leadSentence)) return;
       const words = leadSentence.split(/\s+/).slice(0, 4).join(' ').replace(/[,;:]/g, '');
       const areaTitle = words.length > 3 ? words : `Topic on Page ${pg}`;
 
@@ -1080,7 +1095,7 @@ function generateDynamicSummary(wsId, length = 'medium') {
         bbox: topChunk.bbox,
       });
 
-      if (sList.length > 1) {
+      if (sList.length > 1 && isValidHumanText(sList[1])) {
         keyTakeaways.push({
           point: sList[1],
           quote: sList[1].slice(0, 140),
@@ -1234,10 +1249,11 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
 
   const allStatements = [];
   customChunks.forEach((chunk) => {
+    if (!chunk || !chunk.text || !isValidHumanText(chunk.text)) return;
     const lines = chunk.text
       .split(/(?:[\r\n]+|[.!?]+\s+|•|\s*-\s+|\s*\d+\.\s+)/)
       .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-      .filter((s) => s.length >= 18 && s.length <= 260);
+      .filter((s) => s.length >= 18 && s.length <= 260 && isValidHumanText(s));
 
     lines.forEach((stmt) => {
       allStatements.push({
@@ -1253,15 +1269,26 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
 
   if (allStatements.length === 0) {
     customChunks.forEach((c) => {
-      allStatements.push({
-        statement: c.text.slice(0, 180).trim(),
-        chunk: c,
-        filename: c.filename || 'uploaded document',
-        page: c.page || 1,
-        document_id: c.document_id,
-        bbox: c.bbox || [0.08, 0.2, 0.92, 0.4],
-      });
+      if (!c || !c.text || !isValidHumanText(c.text)) return;
+      const stmt = c.text.slice(0, 180).trim();
+      if (isValidHumanText(stmt)) {
+        allStatements.push({
+          statement: stmt,
+          chunk: c,
+          filename: c.filename || 'uploaded document',
+          page: c.page || 1,
+          document_id: c.document_id,
+          bbox: c.bbox || [0.08, 0.2, 0.92, 0.4],
+        });
+      }
     });
+  }
+
+  if (allStatements.length === 0) {
+    return {
+      session_id: 'sess-demo-' + Date.now(),
+      questions: demoStore.quizQuestions || [],
+    };
   }
 
   const questions = [];
@@ -1271,6 +1298,7 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
   for (let i = 0; i < shuffledStatements.length && questions.length < targetCount; i++) {
     const target = shuffledStatements[i];
     const factText = target.statement;
+    if (!factText || !isValidHumanText(factText)) continue;
 
     const words = factText.split(/\s+/);
     const keyConcept = words.slice(0, Math.min(5, words.length)).join(' ').replace(/[,;:.()]/g, '');
@@ -1284,20 +1312,20 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
 
     const correctOption = factText;
 
-    const otherCandidates = allStatements.filter((s) => s.statement !== factText);
+    const otherCandidates = allStatements.filter((s) => s.statement !== factText && isValidHumanText(s.statement));
     const shuffledOthers = [...otherCandidates].sort(() => Math.random() - 0.5);
 
     let distractor1 = shuffledOthers[0]?.statement;
     let distractor2 = shuffledOthers[1]?.statement;
     let distractor3 = shuffledOthers[2]?.statement;
 
-    if (!distractor1) {
+    if (!distractor1 || !isValidHumanText(distractor1)) {
       distractor1 = `The opposite principle holds, where ${keyConcept} is strictly restricted.`;
     }
-    if (!distractor2) {
+    if (!distractor2 || !isValidHumanText(distractor2)) {
       distractor2 = `It is exclusively confined to unrelated external factors not described in this section.`;
     }
-    if (!distractor3) {
+    if (!distractor3 || !isValidHumanText(distractor3)) {
       distractor3 = `It has no measurable influence according to the evidence outlined on Page ${target.page}.`;
     }
 
@@ -1325,7 +1353,7 @@ function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
 
   return {
     session_id: 'sess-' + Date.now(),
-    questions: questions.length > 0 ? questions : [],
+    questions: questions.length > 0 ? questions : (demoStore.quizQuestions || []),
   };
 }
 
@@ -3982,14 +4010,22 @@ function renderQuizRunner(questions) {
   const container = document.getElementById('quiz-output-container');
   if (!container) return;
 
-  currentQuizList = questions || [];
+  const validQuestions = (questions || []).filter(
+    (q) =>
+      q &&
+      isValidHumanText(q.stem) &&
+      Array.isArray(q.options) &&
+      q.options.every((opt) => isValidHumanText(opt))
+  );
 
-  if (questions.length === 0) {
-    container.innerHTML = '<div class="tool-placeholder">No quiz questions generated yet.</div>';
+  currentQuizList = validQuestions.length > 0 ? validQuestions : (demoStore.quizQuestions || []);
+
+  if (currentQuizList.length === 0) {
+    container.innerHTML = '<div class="tool-placeholder">No quiz questions generated yet. Click "Generate Quiz" to practice.</div>';
     return;
   }
 
-  container.innerHTML = questions
+  container.innerHTML = currentQuizList
     .map((q, qIdx) => {
       const letters = ['A', 'B', 'C', 'D'];
       const optionsHtml = q.options

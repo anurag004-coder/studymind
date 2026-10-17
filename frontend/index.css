@@ -3682,6 +3682,32 @@ button, input, select, textarea {
     gap: 8px !important;
   }
 
+  /* Quiz Card mobile touch styling */
+  .quiz-card {
+    padding: 16px 14px !important;
+    gap: 12px !important;
+    border-radius: 14px !important;
+  }
+
+  .quiz-stem {
+    font-size: 0.94rem !important;
+    line-height: 1.4 !important;
+  }
+
+  .quiz-option-label {
+    padding: 9px 12px !important;
+    font-size: 0.84rem !important;
+    border-radius: 10px !important;
+    align-items: flex-start !important;
+    line-height: 1.4 !important;
+    word-break: break-word !important;
+  }
+
+  .quiz-option-label input[type="radio"] {
+    margin-top: 3px !important;
+    flex-shrink: 0 !important;
+  }
+
   /* Important areas on mobile */
   .important-areas-grid {
     grid-template-columns: 1fr;
