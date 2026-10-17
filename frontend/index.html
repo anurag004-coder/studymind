@@ -708,13 +708,18 @@
         </div>
         <form id="server-config-form" class="auth-form">
           <div class="form-group">
-            <label for="server-api-url-input">API Server Base URL</label>
-            <input type="text" id="server-api-url-input" class="form-input" placeholder="http://127.0.0.1:8000 or https://api.yourdomain.com">
-            <span class="input-hint" style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; display:block;">Default local backend is <code>http://127.0.0.1:8000</code></span>
+            <label for="server-api-url-input">FastAPI Backend Server URL</label>
+            <input type="text" id="server-api-url-input" class="form-input" placeholder="http://127.0.0.1:8000 or https://your-tunnel.loca.lt">
+            <span class="input-hint" style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; display:block;">Connect to your local FastAPI backend or cloud tunnel</span>
+          </div>
+          <div class="form-group">
+            <label for="server-gemini-key-input">Gemini API Key (Optional)</label>
+            <input type="password" id="server-gemini-key-input" class="form-input" placeholder="AIzaSy...">
+            <span class="input-hint" style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; display:block;">Optional: Enables direct browser Gemini AI for custom notes. If blank, our built-in grounded study engine runs offline.</span>
           </div>
           <div class="server-form-actions">
-            <button type="submit" class="btn-submit">Save &amp; Connect</button>
-            <button type="button" id="btn-reset-demo-mode" class="btn-demo">Reset to Demo Mode</button>
+            <button type="submit" class="btn-submit">Save Settings</button>
+            <button type="button" id="btn-reset-demo-mode" class="btn-demo">Reset to Local Demo Mode</button>
           </div>
         </form>
       </div>
@@ -891,6 +896,14 @@
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
   </div>
+
+  <!-- PDF.js for Client-Side Class Notes & PDF Ingestion -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
 
   <script src="/static/app.js"></script>
 </body>

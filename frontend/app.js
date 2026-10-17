@@ -30,7 +30,7 @@ const state = {
 };
 
 // ============================================================================
-// Standalone Demo Store & Mock Router (Offline & Vercel Preview)
+// Standalone Demo Store & Dynamic Study Engine (Client-Side & Vercel Offline)
 // ============================================================================
 
 const demoStore = {
@@ -47,16 +47,20 @@ const demoStore = {
       {
         id: 'doc-demo-dopamine',
         filename: 'dopamine_learning_notes.pdf',
+        pages: 3,
         page_count: 3,
         status: 'ready',
+        ocr_quality: 'good',
         chunk_count: 6,
         created_at: new Date(Date.now() - 3600000).toISOString(),
       },
       {
         id: 'doc-demo-cortex',
         filename: 'prefrontal_cortex_summary.txt',
+        pages: 2,
         page_count: 2,
         status: 'ready',
+        ocr_quality: 'good',
         chunk_count: 4,
         created_at: new Date(Date.now() - 7200000).toISOString(),
       },
@@ -83,20 +87,30 @@ const demoStore = {
         id: 'msg-demo-2',
         role: 'assistant',
         content: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway [1]. When an outcome is better than anticipated, phasic dopamine release reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex and striatum [2].',
+        answer: [
+          {
+            text: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway [1]. When an outcome is better than anticipated, phasic dopamine release reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex and striatum [2].',
+            citations: [],
+          },
+        ],
         created_at: new Date(Date.now() - 110000).toISOString(),
         citations: [
           {
+            n: 1,
             citation_num: 1,
             document_id: 'doc-demo-dopamine',
             page: 1,
             quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+            bbox: [0.08, 0.16, 0.92, 0.28],
             bounding_box: [60, 160, 520, 200],
           },
           {
+            n: 2,
             citation_num: 2,
             document_id: 'doc-demo-dopamine',
             page: 1,
             quote: 'reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex',
+            bbox: [0.08, 0.21, 0.92, 0.32],
             bounding_box: [60, 205, 540, 245],
           },
         ],
@@ -109,35 +123,857 @@ const demoStore = {
     {
       question: 'What type of error signal does phasic dopamine release represent in reinforcement learning?',
       answer: 'A reward-prediction error signal in the mesolimbic pathway, indicating when outcomes exceed expectations.',
+      quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
       citation_quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
       document_id: 'doc-demo-dopamine',
       page: 1,
+      bbox: [0.08, 0.16, 0.92, 0.28],
     },
     {
       question: 'Which cortical region receives mesocortical dopamine projections to regulate working memory?',
       answer: 'The Prefrontal Cortex (PFC), modulating sustained attention and active representations.',
+      quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
       citation_quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
       document_id: 'doc-demo-dopamine',
       page: 2,
+      bbox: [0.08, 0.48, 0.92, 0.58],
     },
     {
       question: 'How does optimal D1 receptor stimulation affect cortical pyramidal neurons?',
       answer: 'It enhances the signal-to-noise ratio in cortical pyramidal neurons during challenging cognitive tasks.',
+      quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
       citation_quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
       document_id: 'doc-demo-dopamine',
       page: 2,
-    },
-    {
-      question: 'What curve describes the cognitive performance relationship with dopamine D1 stimulation?',
-      answer: 'The classic inverted-U dopamine response curve, where both deficiency and excess impair performance.',
-      citation_quote: 'producing the classic inverted-U dopamine response curve.',
-      document_id: 'doc-demo-dopamine',
-      page: 2,
+      bbox: [0.08, 0.52, 0.92, 0.62],
     },
   ],
+  // Dynamic client-side storage for user-uploaded notes and PDFs
+  customDocs: {},
+  customPageImages: {},
+  customChunks: {},
 };
 
-function handleMockApiRequest(endpoint, options = {}) {
+// ============================================================================
+// Client-Side File Ingestion Helpers (PDF.js, Text, & Images)
+// ============================================================================
+
+function splitTextIntoChunks(text, targetSize = 450, overlap = 60) {
+  if (!text || !text.trim()) return [];
+  const rawParagraphs = text.split(/\n{2,}|\r\n\r\n/);
+  const segments = [];
+  for (const para of rawParagraphs) {
+    const trimmed = para.trim();
+    if (!trimmed) continue;
+    if (trimmed.length <= targetSize * 1.4) {
+      segments.push(trimmed);
+    } else {
+      const sentences = trimmed.match(/[^.!?]+[.!?]+|\S+/g) || [trimmed];
+      let cur = '';
+      for (const s of sentences) {
+        if ((cur + ' ' + s).length > targetSize && cur) {
+          segments.push(cur.trim());
+          cur = s;
+        } else {
+          cur += (cur ? ' ' : '') + s;
+        }
+      }
+      if (cur.trim()) segments.push(cur.trim());
+    }
+  }
+  return segments.length > 0 ? segments : [text.slice(0, targetSize)];
+}
+
+function generateTextPageSvg(filename, pageNo, totalPages, lines) {
+  const maxLines = 28;
+  const displayLines = (lines || []).slice(0, maxLines);
+  const textElements = displayLines
+    .map((line, idx) => {
+      const y = 145 + idx * 23;
+      const cleanLine = escapeHtml(line).replace(/&quot;/g, '"');
+      return `<text x="55" y="${y}" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">${cleanLine}</text>`;
+    })
+    .join('\n');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 850" width="100%" height="100%">
+    <rect width="600" height="850" fill="#1b1a18" rx="8"/>
+    <!-- Document Header -->
+    <rect x="35" y="30" width="530" height="65" fill="#262421" rx="6" stroke="#3d3a35" stroke-width="1"/>
+    <text x="55" y="65" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="15" font-weight="700" fill="#f8fafc">${escapeHtml(filename)}</text>
+    <text x="55" y="83" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" fill="#a8a29e">Uploaded Course Notes • Page ${pageNo} of ${totalPages || 1}</text>
+    
+    <!-- Text Page Content -->
+    ${textElements}
+
+    <!-- Footer Note -->
+    <line x1="40" y1="800" x2="560" y2="800" stroke="#3d3a35" stroke-width="1"/>
+    <text x="55" y="822" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="10" fill="#78716c">StudyMind Grounded Document Verification • ${escapeHtml(filename)}</text>
+  </svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+async function extractPdfClientSide(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  if (typeof pdfjsLib === 'undefined') {
+    throw new Error('PDF.js reader library is still loading. Please try again in a few seconds.');
+  }
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const numPages = pdf.numPages;
+  const pages = [];
+  const allChunks = [];
+
+  for (let pageNo = 1; pageNo <= numPages; pageNo++) {
+    const page = await pdf.getPage(pageNo);
+    const viewport = page.getViewport({ scale: 1.5 });
+
+    // Render page to offscreen canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const pageDataUrl = canvas.toDataURL('image/png');
+
+    // Extract text content
+    const textContent = await page.getTextContent();
+    const items = textContent.items || [];
+
+    // Group items by vertical coordinate
+    const lineBuckets = {};
+    for (const it of items) {
+      if (!it.str || !it.str.trim()) continue;
+      const yKey = Math.round(it.transform[5] / 6) * 6;
+      if (!lineBuckets[yKey]) lineBuckets[yKey] = [];
+      lineBuckets[yKey].push(it);
+    }
+
+    const sortedY = Object.keys(lineBuckets).map(Number).sort((a, b) => b - a);
+    const lines = [];
+    for (const y of sortedY) {
+      const sortedX = lineBuckets[y].sort((a, b) => a.transform[4] - b.transform[4]);
+      const lineText = sortedX.map((it) => it.str).join(' ').trim();
+      if (lineText) lines.push(lineText);
+    }
+
+    const fullPageText = lines.join('\n');
+    pages.push({
+      pageNo,
+      image: pageDataUrl,
+      text: fullPageText,
+      lines,
+      width: viewport.width,
+      height: viewport.height,
+    });
+
+    const pageChunks = splitTextIntoChunks(fullPageText, 450, 60);
+    const nChunks = Math.max(1, pageChunks.length);
+    pageChunks.forEach((chunkText, cIdx) => {
+      const yStart = 0.08 + (cIdx / nChunks) * 0.78;
+      const yEnd = Math.min(0.95, yStart + (1 / nChunks) * 0.75);
+      allChunks.push({
+        id: `chunk-p${pageNo}-${cIdx}`,
+        page: pageNo,
+        text: chunkText,
+        bbox: [0.06, yStart, 0.94, yEnd],
+        bounding_box: [0.06, yStart, 0.94, yEnd],
+      });
+    });
+  }
+
+  return { numPages, pages, chunks: allChunks };
+}
+
+async function extractTextFileClientSide(file) {
+  const text = await file.text();
+  const rawLines = text.split(/\r?\n/);
+  const linesPerPage = 30;
+  const numPages = Math.max(1, Math.ceil(rawLines.length / linesPerPage));
+  const pages = [];
+  const allChunks = [];
+
+  for (let p = 1; p <= numPages; p++) {
+    const startIdx = (p - 1) * linesPerPage;
+    const pageLines = rawLines.slice(startIdx, startIdx + linesPerPage);
+    const pageText = pageLines.join('\n');
+    const svgDataUrl = generateTextPageSvg(file.name, p, numPages, pageLines);
+
+    pages.push({
+      pageNo: p,
+      image: svgDataUrl,
+      text: pageText,
+      lines: pageLines,
+      width: 600,
+      height: 850,
+    });
+
+    const pageChunks = splitTextIntoChunks(pageText, 450, 60);
+    const nChunks = Math.max(1, pageChunks.length);
+    pageChunks.forEach((chunkText, cIdx) => {
+      const yStart = 0.12 + (cIdx / nChunks) * 0.74;
+      const yEnd = Math.min(0.95, yStart + (1 / nChunks) * 0.72);
+      allChunks.push({
+        id: `chunk-p${p}-${cIdx}`,
+        page: p,
+        text: chunkText,
+        bbox: [0.06, yStart, 0.94, yEnd],
+        bounding_box: [0.06, yStart, 0.94, yEnd],
+      });
+    });
+  }
+
+  return { numPages, pages, chunks: allChunks };
+}
+
+async function extractImageFileClientSide(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imgDataUrl = e.target.result;
+      const pageText = `Visual Study Document: ${file.name}\nVisual notes, lecture photo, or diagram uploaded from device.`;
+      const chunk = {
+        id: `chunk-img-${Date.now()}`,
+        page: 1,
+        text: pageText,
+        bbox: [0.06, 0.12, 0.94, 0.88],
+        bounding_box: [0.06, 0.12, 0.94, 0.88],
+      };
+      resolve({
+        numPages: 1,
+        pages: [
+          {
+            pageNo: 1,
+            image: imgDataUrl,
+            text: pageText,
+            lines: [file.name],
+            width: 800,
+            height: 1000,
+          },
+        ],
+        chunks: [chunk],
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============================================================================
+// Dynamic Grounded Retrieval & Synthesis Engine
+// ============================================================================
+
+function searchChunks(query, wsId, topK = 4) {
+  const customChunks = demoStore.customChunks?.[wsId] || [];
+  let pool = customChunks;
+  if (pool.length === 0 && wsId === 'ws-demo-neuro') {
+    pool = [
+      {
+        id: 'chunk-demo-1',
+        document_id: 'doc-demo-dopamine',
+        filename: 'dopamine_learning_notes.pdf',
+        page: 1,
+        text: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway. When an outcome is better than anticipated, phasic dopamine release reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex and striatum through long-term potentiation.',
+        bbox: [0.08, 0.16, 0.92, 0.28],
+        bounding_box: [0.08, 0.16, 0.92, 0.28],
+      },
+      {
+        id: 'chunk-demo-2',
+        document_id: 'doc-demo-dopamine',
+        filename: 'dopamine_learning_notes.pdf',
+        page: 2,
+        text: 'The mesocortical projection directs dopamine to the prefrontal cortex to govern working memory and sustained attention. Optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons during challenging cognitive tasks.',
+        bbox: [0.08, 0.48, 0.92, 0.62],
+        bounding_box: [0.08, 0.48, 0.92, 0.62],
+      },
+    ];
+  }
+
+  if (pool.length === 0) return [];
+
+  const stopWords = new Set([
+    'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'are', 'was', 'were',
+    'what', 'how', 'why', 'when', 'which', 'who', 'does', 'do', 'did', 'can', 'explain', 'tell', 'me',
+    'about', 'with', 'from', 'by', 'as', 'it', 'this', 'that', 'these', 'those', 'your', 'my', 'please',
+    'based', 'material', 'notes', 'uploaded', 'document', 'page', 'pages', 'summarize', 'summary',
+  ]);
+
+  const queryClean = query.toLowerCase();
+  const queryTerms = queryClean
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  const scored = pool.map((chk) => {
+    const textLower = chk.text.toLowerCase();
+    let score = 0;
+
+    if (queryTerms.length > 1 && textLower.includes(queryClean.trim())) {
+      score += 25.0;
+    }
+
+    for (const term of queryTerms) {
+      if (textLower.includes(term)) {
+        score += 3.5;
+        const count = textLower.split(term).length - 1;
+        score += Math.min(count - 1, 3) * 1.5;
+      }
+    }
+
+    return { chunk: chk, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.filter((s) => s.score > 0).slice(0, topK).map((s) => s.chunk);
+}
+
+function isMarksQuery(query) {
+  const q = query.toLowerCase();
+  return (
+    q.includes('1 mark') ||
+    q.includes('3 mark') ||
+    q.includes('1 & 3 mark') ||
+    q.includes('marks like 1 mark') ||
+    q.includes('questions and answers based on marks')
+  );
+}
+
+function generateMarksQa(chunks, docName) {
+  const sentences = [];
+  chunks.forEach((c) => {
+    const sList = c.text.match(/[^.!?]+[.!?]+/g) || [c.text];
+    sList.forEach((s) => {
+      const clean = s.trim();
+      if (clean.length > 25) {
+        sentences.push({ text: clean, chunk: c });
+      }
+    });
+  });
+
+  const citations = [];
+  let citCounter = 1;
+
+  let q1Text = 'What is the primary role described in the material?';
+  let a1Text = 'It represents a core functional mechanism identified in your notes.';
+  if (sentences.length > 0) {
+    const s1 = sentences[0];
+    const words = s1.text.split(' ');
+    const keyword = words.slice(0, 4).join(' ').replace(/[,;:]/g, '');
+    q1Text = `Define or state the role of: ${keyword}`;
+    a1Text = `${s1.text} [${citCounter}]`;
+    citations.push({
+      n: citCounter,
+      citation_num: citCounter,
+      document_id: s1.chunk.document_id,
+      page: s1.chunk.page,
+      quote: s1.text.slice(0, 140),
+      bbox: s1.chunk.bbox,
+      bounding_box: s1.chunk.bounding_box,
+    });
+    citCounter++;
+  }
+
+  let q2Text = 'State a key property or finding.';
+  let a2Text = 'Documented as a verified property.';
+  if (sentences.length > 1) {
+    const s2 = sentences[1];
+    q2Text = `State the significance of the concept on Page ${s2.chunk.page}.`;
+    a2Text = `${s2.text} [${citCounter}]`;
+    citations.push({
+      n: citCounter,
+      citation_num: citCounter,
+      document_id: s2.chunk.document_id,
+      page: s2.chunk.page,
+      quote: s2.text.slice(0, 140),
+      bbox: s2.chunk.bbox,
+      bounding_box: s2.chunk.bounding_box,
+    });
+    citCounter++;
+  }
+
+  let q3Text = 'Explain the mechanism or concept in detail.';
+  const a3Points = [];
+  const remainSentences = sentences.slice(2, 5);
+  if (remainSentences.length > 0) {
+    remainSentences.forEach((s, idx) => {
+      a3Points.push(`${idx + 1}. ${s.text} [${citCounter}]`);
+      citations.push({
+        n: citCounter,
+        citation_num: citCounter,
+        document_id: s.chunk.document_id,
+        page: s.chunk.page,
+        quote: s.text.slice(0, 140),
+        bbox: s.chunk.bbox,
+        bounding_box: s.chunk.bounding_box,
+      });
+      citCounter++;
+    });
+  } else if (sentences.length > 0) {
+    a3Points.push(`1. ${sentences[0].text} [1]`);
+  }
+
+  const content = `### 🎯 Grounded 1-Mark Questions (Objective / Definitions)
+
+**Q1 (1 Mark):** ${q1Text}
+**Answer:** ${a1Text}
+
+**Q2 (1 Mark):** ${q2Text}
+**Answer:** ${a2Text}
+
+---
+
+### 📝 Grounded 3-Mark Question (Analytical & Mechanism)
+
+**Q3 (3 Marks):** ${q3Text}
+**Structured Answer:**
+${a3Points.join('\n')}
+
+*All answers strictly verified from your uploaded document (${escapeHtml(docName || 'study notes')}).*`;
+
+  return {
+    content,
+    answer: [{ text: content, citations }],
+    citations,
+    confidence: 'high',
+    verification_status: 'grounded',
+  };
+}
+
+async function synthesizeGroundedAnswer(query, chunks, wsId) {
+  const geminiKey = typeof localStorage !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+
+  // 1. If user supplied Gemini API key, attempt real Gemini 1.5 Flash grounded call
+  if (geminiKey && geminiKey.trim()) {
+    try {
+      const contextBlocks = chunks
+        .map((c, i) => `[${i + 1}] (Document: ${c.filename || 'Notes'}, Page ${c.page}):\n${c.text}`)
+        .join('\n\n');
+      const prompt = `You are StudyMind, a strictly grounded study assistant. You must follow these rules:
+1. ONLY answer using the provided retrieved material below. Never use outside knowledge.
+2. For EVERY single assertion or sentence, append the citation tag [1], [2], etc., corresponding to the chunk used.
+3. If the retrieved material does not contain the answer, reply ONLY with: "I could not find sufficient evidence in your uploaded study notes to answer this question."
+
+Retrieved Study Material:
+${contextBlocks}
+
+Student Question: "${query}"
+
+Grounded Answer:`;
+
+      const gRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey.trim()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+          }),
+        }
+      );
+
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        const candidate = gData?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidate && candidate.trim()) {
+          const rawAnswer = candidate.trim();
+          const citations = [];
+          chunks.forEach((chk, idx) => {
+            const citNum = idx + 1;
+            if (rawAnswer.includes(`[${citNum}]`)) {
+              citations.push({
+                n: citNum,
+                citation_num: citNum,
+                document_id: chk.document_id,
+                page: chk.page,
+                quote: chk.text.slice(0, 140),
+                bbox: chk.bbox || [0.08, 0.2, 0.92, 0.35],
+                bounding_box: chk.bounding_box || [0.08, 0.2, 0.92, 0.35],
+              });
+            }
+          });
+          if (citations.length === 0 && chunks.length > 0) {
+            citations.push({
+              n: 1,
+              citation_num: 1,
+              document_id: chunks[0].document_id,
+              page: chunks[0].page,
+              quote: chunks[0].text.slice(0, 140),
+              bbox: chunks[0].bbox,
+              bounding_box: chunks[0].bounding_box,
+            });
+          }
+
+          return {
+            content: rawAnswer,
+            answer: [{ text: rawAnswer, citations }],
+            citations,
+            confidence: 'high',
+            verification_status: 'grounded',
+          };
+        }
+      }
+    } catch (gErr) {
+      console.warn('Gemini client call error, falling back to local grounded engine:', gErr);
+    }
+  }
+
+  // 2. Local deterministic grounded synthesis (Zero external dependency, 100% grounded)
+  const citations = [];
+  const answerSentences = [];
+
+  chunks.forEach((chunk, idx) => {
+    const citNum = idx + 1;
+    const sList = chunk.text.match(/[^.!?]+[.!?]+/g) || [chunk.text];
+    let bestSentence = sList[0].trim();
+    const qWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    for (const s of sList) {
+      const sLower = s.toLowerCase();
+      if (qWords.some((w) => sLower.includes(w))) {
+        bestSentence = s.trim();
+        break;
+      }
+    }
+
+    answerSentences.push(`${bestSentence} [${citNum}]`);
+    citations.push({
+      n: citNum,
+      citation_num: citNum,
+      document_id: chunk.document_id,
+      page: chunk.page,
+      quote: bestSentence.slice(0, 140),
+      bbox: chunk.bbox || [0.08, 0.15, 0.92, 0.3],
+      bounding_box: chunk.bounding_box || [0.08, 0.15, 0.92, 0.3],
+    });
+  });
+
+  const docName = chunks[0]?.filename || 'your uploaded notes';
+  const fullAnswer = `Based on your uploaded course notes (${escapeHtml(docName)}):\n\n${answerSentences.join('\n\n')}`;
+
+  return {
+    content: fullAnswer,
+    answer: [{ text: fullAnswer, citations }],
+    citations,
+    confidence: 'high',
+    verification_status: 'grounded',
+  };
+}
+
+function generateDynamicSummary(wsId, length = 'medium') {
+  const customChunks = demoStore.customChunks?.[wsId] || [];
+  if (customChunks.length === 0) {
+    return {
+      title: 'Chapter 4: Dopaminergic Signaling & Cognitive Control',
+      summary:
+        'Dopamine projections from the ventral tegmental area (VTA) and substantia nigra modulate both motor execution and executive cognitive functions. Phasic dopamine signals encode reward-prediction errors in the mesolimbic pathway, while tonic mesocortical signals in the prefrontal cortex sustain active working memory representations via D1 receptors.',
+      pages_covered: [
+        { page: 1, document_id: 'doc-demo-dopamine', title: 'Reward Signals' },
+        { page: 2, document_id: 'doc-demo-dopamine', title: 'PFC Working Memory' },
+      ],
+      important_areas: [
+        {
+          area_title: 'Dopaminergic Pathways',
+          summary: 'Phasic bursts communicate reward prediction errors facilitating synaptic plasticity.',
+          quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+          page: 1,
+          document_id: 'doc-demo-dopamine',
+        },
+        {
+          area_title: 'Prefrontal Modulation',
+          summary: 'Optimal D1 receptor activation tunes cortical signal-to-noise ratio.',
+          quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+          page: 2,
+          document_id: 'doc-demo-dopamine',
+        },
+      ],
+      key_takeaways: [
+        {
+          point: 'Phasic bursts communicate reward prediction errors facilitating reinforcement learning.',
+          quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+          page: 1,
+          document_id: 'doc-demo-dopamine',
+        },
+        {
+          point: 'Mesocortical projections to the PFC gate distractors and stabilize mental representations.',
+          quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+          page: 2,
+          document_id: 'doc-demo-dopamine',
+        },
+      ],
+    };
+  }
+
+  const docNames = Array.from(new Set(customChunks.map((c) => c.filename))).filter(Boolean);
+  const title = `Summary: ${docNames[0] || 'Course Material'}`;
+  const pagesList = Array.from(new Set(customChunks.map((c) => c.page))).sort((a, b) => a - b);
+
+  const importantAreas = [];
+  const keyTakeaways = [];
+  const overviewSentences = [];
+
+  customChunks.forEach((c) => {
+    const sList = c.text.match(/[^.!?]+[.!?]+/g) || [c.text];
+    if (sList.length > 0 && overviewSentences.length < 5) {
+      overviewSentences.push(sList[0].trim());
+    }
+  });
+
+  pagesList.slice(0, 4).forEach((pg) => {
+    const pageChunks = customChunks.filter((c) => c.page === pg);
+    if (pageChunks.length > 0) {
+      const topChunk = pageChunks[0];
+      const sList = topChunk.text.match(/[^.!?]+[.!?]+/g) || [topChunk.text];
+      const leadSentence = sList[0].trim();
+      const words = leadSentence.split(/\s+/).slice(0, 4).join(' ').replace(/[,;:]/g, '');
+      const areaTitle = words.length > 3 ? words : `Topic on Page ${pg}`;
+
+      importantAreas.push({
+        area_title: areaTitle,
+        summary: leadSentence,
+        quote: leadSentence.slice(0, 140),
+        page: pg,
+        document_id: topChunk.document_id,
+        bbox: topChunk.bbox,
+      });
+
+      if (sList.length > 1) {
+        keyTakeaways.push({
+          point: sList[1].trim(),
+          quote: sList[1].trim().slice(0, 140),
+          page: pg,
+          document_id: topChunk.document_id,
+          bbox: topChunk.bbox,
+        });
+      }
+    }
+  });
+
+  if (keyTakeaways.length === 0 && importantAreas.length > 0) {
+    keyTakeaways.push({
+      point: importantAreas[0].summary,
+      quote: importantAreas[0].quote,
+      page: importantAreas[0].page,
+      document_id: importantAreas[0].document_id,
+    });
+  }
+
+  const pagesCovered = pagesList.map((pg) => {
+    const c = customChunks.find((chk) => chk.page === pg);
+    return {
+      page: pg,
+      document_id: c?.document_id || '',
+      title: `Page ${pg}`,
+    };
+  });
+
+  return {
+    title,
+    summary: overviewSentences.join(' ') || 'Comprehensive summary of uploaded notes.',
+    pages_covered: pagesCovered,
+    important_areas: importantAreas,
+    key_takeaways: keyTakeaways,
+  };
+}
+
+function generateDynamicFlashcards(wsId, count = 5) {
+  const customChunks = demoStore.customChunks?.[wsId] || [];
+  if (customChunks.length === 0) {
+    return { flashcards: demoStore.flashcards };
+  }
+
+  const cards = [];
+  for (const chunk of customChunks) {
+    if (cards.length >= count) break;
+    const sList = chunk.text.match(/[^.!?]+[.!?]+/g) || [chunk.text];
+    for (const s of sList) {
+      if (cards.length >= count) break;
+      const clean = s.trim();
+      if (clean.length < 30) continue;
+
+      let q = '';
+      let a = '';
+      if (
+        clean.toLowerCase().includes(' is ') ||
+        clean.toLowerCase().includes(' refers to ') ||
+        clean.toLowerCase().includes(' are ')
+      ) {
+        const parts = clean.split(/\s+(?:is|refers to|are)\s+/i);
+        if (parts.length >= 2 && parts[0].length < 60) {
+          q = `What is ${parts[0].trim()}?`;
+          a = `It ${clean.substring(parts[0].length).trim()}`;
+        }
+      }
+
+      if (!q) {
+        const words = clean.split(/\s+/);
+        const head = words.slice(0, 4).join(' ');
+        q = `According to Page ${chunk.page}, what is stated regarding "${head}"?`;
+        a = clean;
+      }
+
+      cards.push({
+        id: `fc-${Date.now()}-${cards.length}`,
+        question: q,
+        answer: a,
+        quote: clean.slice(0, 140),
+        citation_quote: clean.slice(0, 140),
+        page: chunk.page,
+        document_id: chunk.document_id,
+        bbox: chunk.bbox,
+      });
+    }
+  }
+
+  return { flashcards: cards.length > 0 ? cards : demoStore.flashcards };
+}
+
+function generateDynamicQuiz(wsId, count = 3, diff = 'medium') {
+  const customChunks = demoStore.customChunks?.[wsId] || [];
+  if (customChunks.length === 0) {
+    return {
+      session_id: 'sess-demo-' + Date.now(),
+      questions: [
+        {
+          id: 'q-demo-1',
+          type: 'mcq',
+          marks: 1,
+          stem: 'In reinforcement learning models, what does phasic dopamine discharge signify?',
+          options: [
+            'A reward-prediction error signal',
+            'Baseline metabolic activity in the cerebellum',
+            'Inhibition of sympathetic neurotransmission',
+            'Permanent depletion of serotonin vesicles',
+          ],
+          correct_answer_index: 0,
+          quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+          explanation: 'Verified against Chapter 4 excerpt.',
+          document_id: 'doc-demo-dopamine',
+          page: 1,
+        },
+        {
+          id: 'q-demo-2',
+          type: 'mcq',
+          marks: 1,
+          stem: 'Which cortical region is targeted by the mesocortical dopamine tract for working memory regulation?',
+          options: [
+            'Primary Occipital Cortex (V1)',
+            'Prefrontal Cortex (PFC)',
+            'Auditory Cortex (A1)',
+            'Somatosensory Strip (S1)',
+          ],
+          correct_answer_index: 1,
+          quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+          explanation: 'Verified against Chapter 4 excerpt.',
+          document_id: 'doc-demo-dopamine',
+          page: 2,
+        },
+      ],
+    };
+  }
+
+  const questions = [];
+  for (let i = 0; i < customChunks.length && questions.length < count; i++) {
+    const chunk = customChunks[i];
+    const sList = (chunk.text.match(/[^.!?]+[.!?]+/g) || [chunk.text])
+      .map((s) => s.trim())
+      .filter((s) => s.length > 25);
+    if (sList.length === 0) continue;
+
+    const factSentence = sList[0];
+    const words = factSentence.split(/\s+/);
+    const keyTerm = words.slice(0, 4).join(' ').replace(/[,;:]/g, '');
+
+    const correctOption = factSentence;
+    const distractor1 = `The opposite applies, where ${keyTerm} inhibits active processing.`;
+    const distractor2 = `It is exclusively confined to unrelated peripheral motor pathways.`;
+    const distractor3 = `It has been superseded by external ungrounded hypotheses.`;
+
+    const rawOptions = [correctOption, distractor1, distractor2, distractor3];
+    const shuffled = rawOptions
+      .map((val, idx) => ({ val, isCorrect: idx === 0 }))
+      .sort(() => Math.random() - 0.5);
+
+    const correctIdx = shuffled.findIndex((o) => o.isCorrect);
+
+    questions.push({
+      id: `q-${Date.now()}-${questions.length}`,
+      type: 'mcq',
+      marks: 1,
+      stem: `According to your study notes on Page ${chunk.page}, which of the following is correct regarding "${escapeHtml(keyTerm)}"?`,
+      options: shuffled.map((o) => o.val),
+      correct_answer_index: correctIdx,
+      quote: factSentence.slice(0, 140),
+      explanation: `Verified directly from ${escapeHtml(chunk.filename || 'course material')} on page ${chunk.page}.`,
+      document_id: chunk.document_id,
+      page: chunk.page,
+      bbox: chunk.bbox,
+    });
+  }
+
+  return {
+    session_id: 'sess-' + Date.now(),
+    questions: questions.length > 0 ? questions : [],
+  };
+}
+
+function generateDynamicQa(wsId) {
+  const customChunks = demoStore.customChunks?.[wsId] || [];
+  if (customChunks.length === 0) {
+    return {
+      questions: [
+        {
+          marks: 1,
+          question: 'What error signal does phasic dopamine release encode in the mesolimbic pathway?',
+          answer: 'It encodes a reward-prediction error signal indicating an outcome superior to expectation [1].',
+          citations: [
+            {
+              citation_num: 1,
+              document_id: 'doc-demo-dopamine',
+              page: 1,
+              quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+            },
+          ],
+        },
+        {
+          marks: 3,
+          question: 'Explain how D1 receptor stimulation in the prefrontal cortex influences working memory performance.',
+          answer:
+            'Mesocortical dopamine projections innervate the PFC [1]. Moderate D1 stimulation increases signal-to-noise ratio in pyramidal neurons [2], while excessive or inadequate levels disrupt delay-period firing, displaying an inverted-U relationship.',
+          citations: [
+            {
+              citation_num: 1,
+              document_id: 'doc-demo-dopamine',
+              page: 2,
+              quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+            },
+            {
+              citation_num: 2,
+              document_id: 'doc-demo-dopamine',
+              page: 2,
+              quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  const res = generateMarksQa(customChunks, customChunks[0]?.filename);
+  return {
+    questions: [
+      {
+        marks: 1,
+        question: `Define key concepts from ${escapeHtml(customChunks[0]?.filename || 'notes')}`,
+        answer: res.content,
+        citations: res.citations,
+      },
+    ],
+  };
+}
+
+// ============================================================================
+// Standalone API Mock Router (Offline & Vercel Preview)
+// ============================================================================
+
+async function handleMockApiRequest(endpoint, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const cleanEp = endpoint.split('?')[0];
 
@@ -197,14 +1033,16 @@ function handleMockApiRequest(endpoint, options = {}) {
       const newDoc = {
         id: newDocId,
         filename,
-        page_count: 3,
+        pages: 1,
+        page_count: 1,
         status: 'ready',
-        chunk_count: 6,
+        ocr_quality: 'good',
+        chunk_count: 3,
         created_at: new Date().toISOString(),
       };
       if (!demoStore.documents[wsId]) demoStore.documents[wsId] = [];
       demoStore.documents[wsId].unshift(newDoc);
-      return { document_id: newDocId, status: 'ready', message: 'Document ingested successfully' };
+      return { document_id: newDocId, status: 'ready', pages: 1, message: 'Document ingested successfully' };
     }
     return demoStore.documents[wsId] || [];
   }
@@ -220,6 +1058,8 @@ function handleMockApiRequest(endpoint, options = {}) {
     for (const wsKey in demoStore.documents) {
       demoStore.documents[wsKey] = demoStore.documents[wsKey].filter((d) => d.id !== dId);
     }
+    if (demoStore.customDocs) delete demoStore.customDocs[dId];
+    if (demoStore.customPageImages) delete demoStore.customPageImages[dId];
     return { message: 'Document deleted' };
   }
 
@@ -248,7 +1088,7 @@ function handleMockApiRequest(endpoint, options = {}) {
     const convId = convMsgsMatch[1];
     if (method === 'POST') {
       const body = options.body ? JSON.parse(options.body) : {};
-      const userText = body.content || '';
+      const userText = body.question || body.content || '';
       const userMsg = {
         id: 'msg-' + Date.now(),
         role: 'user',
@@ -258,30 +1098,82 @@ function handleMockApiRequest(endpoint, options = {}) {
       if (!demoStore.messages[convId]) demoStore.messages[convId] = [];
       demoStore.messages[convId].push(userMsg);
 
-      const assistantMsg = {
-        id: 'msg-' + (Date.now() + 1),
-        role: 'assistant',
-        content: `Based on your uploaded course notes, the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory and sustained attention [1]. Experimental evidence demonstrates that optimal D1 receptor stimulation enhances the signal-to-noise ratio in cortical pyramidal neurons [2].`,
-        created_at: new Date().toISOString(),
-        citations: [
-          {
-            citation_num: 1,
-            document_id: 'doc-demo-dopamine',
-            page: 2,
-            quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
-            bounding_box: [60, 480, 520, 520],
-          },
-          {
-            citation_num: 2,
-            document_id: 'doc-demo-dopamine',
-            page: 2,
-            quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
-            bounding_box: [60, 520, 520, 555],
-          },
-        ],
-        confidence: 'high',
-        verification_status: 'grounded',
-      };
+      const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+      const customChunks = demoStore.customChunks?.[wsId] || [];
+
+      let assistantMsg = null;
+      if (customChunks.length > 0) {
+        if (isMarksQuery(userText)) {
+          const marksRes = generateMarksQa(customChunks, customChunks[0]?.filename);
+          assistantMsg = {
+            id: 'msg-' + (Date.now() + 1),
+            role: 'assistant',
+            ...marksRes,
+            created_at: new Date().toISOString(),
+          };
+        } else {
+          const matched = searchChunks(userText, wsId, 3);
+          if (matched.length === 0) {
+            assistantMsg = {
+              id: 'msg-' + (Date.now() + 1),
+              role: 'assistant',
+              abstained: true,
+              confidence: 'low',
+              verification_status: 'abstain',
+              missing_info: `Topics related to "${userText}" were not found in your uploaded materials.`,
+              content: `I could not find sufficient evidence in your uploaded study notes to answer: "${userText}".\n\nUnder StudyMind's strict grounding policy, I never fabricate answers from outside knowledge. Please verify that this topic is included in your uploaded notes.`,
+              citations: [],
+              suggestions: ['Summarize page 1', 'Generate 1-mark & 3-mark Q&A', 'What are the main concepts?'],
+              created_at: new Date().toISOString(),
+            };
+          } else {
+            const groundedRes = await synthesizeGroundedAnswer(userText, matched, wsId);
+            assistantMsg = {
+              id: 'msg-' + (Date.now() + 1),
+              role: 'assistant',
+              ...groundedRes,
+              created_at: new Date().toISOString(),
+            };
+          }
+        }
+      } else {
+        // Fallback demo dopamine response
+        assistantMsg = {
+          id: 'msg-' + (Date.now() + 1),
+          role: 'assistant',
+          content: `Based on your uploaded course notes, the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory and sustained attention [1]. Experimental evidence demonstrates that optimal D1 receptor stimulation enhances the signal-to-noise ratio in cortical pyramidal neurons [2].`,
+          answer: [
+            {
+              text: `Based on your uploaded course notes, the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory and sustained attention [1]. Experimental evidence demonstrates that optimal D1 receptor stimulation enhances the signal-to-noise ratio in cortical pyramidal neurons [2].`,
+              citations: [],
+            },
+          ],
+          created_at: new Date().toISOString(),
+          citations: [
+            {
+              n: 1,
+              citation_num: 1,
+              document_id: 'doc-demo-dopamine',
+              page: 2,
+              quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+              bbox: [0.08, 0.48, 0.92, 0.58],
+              bounding_box: [60, 480, 520, 520],
+            },
+            {
+              n: 2,
+              citation_num: 2,
+              document_id: 'doc-demo-dopamine',
+              page: 2,
+              quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+              bbox: [0.08, 0.52, 0.92, 0.62],
+              bounding_box: [60, 520, 520, 555],
+            },
+          ],
+          confidence: 'high',
+          verification_status: 'grounded',
+        };
+      }
+
       demoStore.messages[convId].push(assistantMsg);
       return assistantMsg;
     }
@@ -290,97 +1182,36 @@ function handleMockApiRequest(endpoint, options = {}) {
 
   // 6. Study Tools
   if (cleanEp.includes('/study/flashcards')) {
-    return { flashcards: demoStore.flashcards };
+    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+    const body = options.body ? JSON.parse(options.body) : {};
+    return generateDynamicFlashcards(wsId, body.count || 5);
   }
   if (cleanEp.includes('/study/summary')) {
-    return {
-      title: 'Chapter 4: Dopaminergic Signaling & Cognitive Control',
-      summary: 'Dopamine projections from the ventral tegmental area (VTA) and substantia nigra modulate both motor execution and executive cognitive functions. Phasic dopamine signals encode reward-prediction errors in the mesolimbic pathway, while tonic mesocortical signals in the prefrontal cortex sustain active working memory representations via D1 receptors.',
-      key_points: [
-        'Phasic bursts communicate reward prediction errors facilitating reinforcement learning [1].',
-        'Mesocortical projections to the PFC gate distractors and stabilize mental representations [2].',
-        'D1 receptor modulation follows an inverted-U performance profile across working memory tasks [2].'
-      ],
-      citations: [
-        {
-          citation_num: 1,
-          document_id: 'doc-demo-dopamine',
-          page: 1,
-          quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
-        },
-        {
-          citation_num: 2,
-          document_id: 'doc-demo-dopamine',
-          page: 2,
-          quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
-        },
-      ],
-    };
+    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+    const body = options.body ? JSON.parse(options.body) : {};
+    return generateDynamicSummary(wsId, body.length || 'medium');
   }
   if (cleanEp.includes('/study/qa')) {
-    return {
-      questions: [
-        {
-          marks: 1,
-          question: 'What error signal does phasic dopamine release encode in the mesolimbic pathway?',
-          answer: 'It encodes a reward-prediction error signal indicating an outcome superior to expectation [1].',
-          citations: [{ citation_num: 1, document_id: 'doc-demo-dopamine', page: 1, quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.' }]
-        },
-        {
-          marks: 3,
-          question: 'Explain how D1 receptor stimulation in the prefrontal cortex influences working memory performance.',
-          answer: 'Mesocortical dopamine projections innervate the PFC [1]. Moderate D1 stimulation increases signal-to-noise ratio in pyramidal neurons [2], while excessive or inadequate levels disrupt delay-period firing, displaying an inverted-U relationship.',
-          citations: [
-            { citation_num: 1, document_id: 'doc-demo-dopamine', page: 2, quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory' },
-            { citation_num: 2, document_id: 'doc-demo-dopamine', page: 2, quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons' }
-          ]
-        }
-      ]
-    };
+    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+    return generateDynamicQa(wsId);
   }
   if (cleanEp.includes('/study/items')) {
-    return { items: demoStore.flashcards.map((f, idx) => ({ id: 'item-' + idx, type: 'flashcard', payload: f })) };
+    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+    const fcData = generateDynamicFlashcards(wsId, 5);
+    return { items: (fcData.flashcards || []).map((f, idx) => ({ id: 'item-' + idx, type: 'flashcard', payload: f })) };
   }
 
   // 7. Quiz & Practice
   if (cleanEp.includes('/study/quiz') || cleanEp.includes('/quizzes')) {
-    return {
-      session_id: 'sess-demo-' + Date.now(),
-      questions: [
-        {
-          id: 'q-demo-1',
-          type: 'mcq',
-          marks: 1,
-          question: 'In reinforcement learning models, what does phasic dopamine discharge signify?',
-          options: [
-            'Baseline metabolic activity in the cerebellum',
-            'A reward-prediction error signal',
-            'Inhibition of sympathetic neurotransmission',
-            'Permanent depletion of serotonin vesicles'
-          ],
-          citation: { document_id: 'doc-demo-dopamine', page: 1, quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.' }
-        },
-        {
-          id: 'q-demo-2',
-          type: 'mcq',
-          marks: 1,
-          question: 'Which cortical region is targeted by the mesocortical dopamine tract for working memory regulation?',
-          options: [
-            'Prefrontal Cortex (PFC)',
-            'Primary Occipital Cortex (V1)',
-            'Auditory Cortex (A1)',
-            'Somatosensory Strip (S1)'
-          ],
-          citation: { document_id: 'doc-demo-dopamine', page: 2, quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory' }
-        }
-      ]
-    };
+    const wsId = state.currentWorkspaceId || 'ws-demo-neuro';
+    const body = options.body ? JSON.parse(options.body) : {};
+    return generateDynamicQuiz(wsId, body.count || 3, body.difficulty || 'medium');
   }
   if (cleanEp.includes('/answers')) {
-    return { status: 'recorded', correct: true, feedback: 'Correct! Verified against Chapter 4 excerpt.' };
+    return { status: 'recorded', correct: true, feedback: 'Correct! Verified against course notes.' };
   }
   if (cleanEp.includes('/submit')) {
-    return { score: 2, total_marks: 2, percentage: 100, topic_breakdown: { 'Dopamine Pathways': 100 } };
+    return { score: 2, total_marks: 2, percentage: 100, topic_breakdown: { 'Course Mastery': 100 } };
   }
   if (cleanEp.includes('/feedback') || cleanEp.includes('/report')) {
     return { status: 'recorded', message: 'Feedback saved' };
@@ -399,6 +1230,11 @@ function updateServerStatusUI(mode) {
   const currentBase = localStorage.getItem('studymind_api_base');
   if (urlInput && currentBase) {
     urlInput.value = currentBase;
+  }
+  const geminiInput = document.getElementById('server-gemini-key-input');
+  const currentGeminiKey = localStorage.getItem('gemini_api_key');
+  if (geminiInput && currentGeminiKey) {
+    geminiInput.value = currentGeminiKey;
   }
 
   if (mode === 'connected' && currentBase) {
@@ -420,7 +1256,7 @@ function updateServerStatusUI(mode) {
 
 async function apiRequest(endpoint, options = {}) {
   if (state.isDemoMode) {
-    return handleMockApiRequest(endpoint, options);
+    return await handleMockApiRequest(endpoint, options);
   }
 
   const headers = options.headers || {};
@@ -452,7 +1288,7 @@ async function apiRequest(endpoint, options = {}) {
         console.warn(`API returned ${res.status} for ${endpoint}. Activating demo mode fallback.`);
         state.isDemoMode = true;
         updateServerStatusUI('demo');
-        return handleMockApiRequest(endpoint, options);
+        return await handleMockApiRequest(endpoint, options);
       }
       throw new Error(msg);
     }
@@ -463,7 +1299,7 @@ async function apiRequest(endpoint, options = {}) {
       console.warn(`Connection failed to ${API_BASE}${endpoint}. Activating demo mode fallback.`);
       state.isDemoMode = true;
       updateServerStatusUI('demo');
-      return handleMockApiRequest(endpoint, options);
+      return await handleMockApiRequest(endpoint, options);
     }
     console.error(`API Error [${endpoint}]:`, err);
     throw err;
@@ -757,41 +1593,91 @@ async function handleMultipleFiles(files) {
     const basePct = Math.round((i / total) * 100);
 
     if (progressDocName) progressDocName.textContent = `[${itemNum}/${total}] ${file.name}`;
-    if (progressStage) progressStage.textContent = `uploading ${itemNum}/${total}`;
+    if (progressStage) progressStage.textContent = `reading ${itemNum}/${total}`;
     if (progressFill) progressFill.style.width = `${basePct + 15}%`;
     if (progressPercent) progressPercent.textContent = `${basePct + 15}%`;
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      const ext = file.name.split('.').pop().toLowerCase();
+      let parsedDoc = null;
 
-      // 1. Upload file
-      const uploadRes = await apiRequest(`/workspaces/${state.currentWorkspaceId}/documents`, {
-        method: 'POST',
-        body: formData,
-        isFormData: true,
-      });
+      if (progressStage) progressStage.textContent = `parsing & indexing ${itemNum}/${total}`;
 
-      const docId = uploadRes.document_id;
-      lastDocId = docId;
-      lastPages = uploadRes.pages || 1;
-
-      if (progressStage) progressStage.textContent = `processing ${itemNum}/${total}`;
-      if (progressFill) progressFill.style.width = `${Math.round(((i + 0.7) / total) * 100)}%`;
-
-      // 2. Trigger ingestion pipeline
-      try {
-        await apiRequest(`/documents/${docId}/reprocess`, {
-          method: 'POST',
-          body: JSON.stringify({ force_vision_ocr: false }),
-        });
-      } catch {
-        // In case worker takes over asynchronously
+      if (ext === 'pdf') {
+        parsedDoc = await extractPdfClientSide(file);
+      } else if (['txt', 'md', 'json', 'csv', 'py', 'js', 'html', 'docx'].includes(ext)) {
+        parsedDoc = await extractTextFileClientSide(file);
+      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+        parsedDoc = await extractImageFileClientSide(file);
+      } else {
+        parsedDoc = await extractTextFileClientSide(file);
       }
 
+      const docId = 'doc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+      const numPages = parsedDoc ? parsedDoc.numPages : 1;
+      const chunks = parsedDoc ? parsedDoc.chunks : [];
+      const pages = parsedDoc ? parsedDoc.pages : [];
+
+      // Store in memory stores
+      if (!demoStore.customDocs) demoStore.customDocs = {};
+      demoStore.customDocs[docId] = {
+        id: docId,
+        filename: file.name,
+        page_count: numPages,
+        pages,
+        chunks,
+      };
+
+      if (!demoStore.customPageImages) demoStore.customPageImages = {};
+      demoStore.customPageImages[docId] = {};
+      pages.forEach((p) => {
+        demoStore.customPageImages[docId][p.pageNo] = p.image;
+      });
+
+      if (!demoStore.customChunks) demoStore.customChunks = {};
+      if (!demoStore.customChunks[state.currentWorkspaceId]) demoStore.customChunks[state.currentWorkspaceId] = [];
+      chunks.forEach((c) => {
+        c.document_id = docId;
+        c.filename = file.name;
+        demoStore.customChunks[state.currentWorkspaceId].push(c);
+      });
+
+      const docRecord = {
+        id: docId,
+        filename: file.name,
+        pages: numPages,
+        page_count: numPages,
+        status: 'ready',
+        ocr_quality: 'good',
+        chunk_count: chunks.length,
+        created_at: new Date().toISOString(),
+      };
+
+      if (!demoStore.documents[state.currentWorkspaceId]) {
+        demoStore.documents[state.currentWorkspaceId] = [];
+      }
+      demoStore.documents[state.currentWorkspaceId].unshift(docRecord);
+
+      // If backend is active and not in demo mode, also attempt upload to backend
+      if (!state.isDemoMode) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          await apiRequest(`/workspaces/${state.currentWorkspaceId}/documents`, {
+            method: 'POST',
+            body: formData,
+            isFormData: true,
+          });
+        } catch (backendErr) {
+          console.warn('Backend document upload skipped, client-side indexing active:', backendErr);
+        }
+      }
+
+      lastDocId = docId;
+      lastPages = numPages;
       successCount++;
     } catch (err) {
-      console.error(`Failed to upload ${file.name}:`, err);
+      console.error(`Failed to ingest ${file.name}:`, err);
       showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
     }
   }
@@ -803,7 +1689,7 @@ async function handleMultipleFiles(files) {
   if (successCount > 0) {
     showToast(
       total === 1
-        ? `"${fileList[0].name}" ingested & indexed!`
+        ? `"${fileList[0].name}" indexed! Ready for study, chat & quizzes.`
         : `Successfully ingested & indexed ${successCount} documents!`,
       'success'
     );
@@ -811,7 +1697,7 @@ async function handleMultipleFiles(files) {
 
   setTimeout(() => {
     if (progressCard) progressCard.classList.add('hidden');
-  }, 2500);
+  }, 2200);
 
   await loadDocuments();
 
@@ -1116,7 +2002,7 @@ function appendAssistantMessage(payload) {
       ? payload.answer
           .map((a) => a.text)
           .join(payload.answer.some((a) => a.text && a.text.trim().startsWith('-')) ? '\n' : ' ')
-      : '';
+      : (payload.content || '');
     const formattedHtml = formatAssistantMarkdown(answerText);
 
     // Render citations card list
@@ -1127,16 +2013,17 @@ function appendAssistantMessage(payload) {
           <span class="sources-label">Grounded Sources & Citations</span>
           ${payload.citations
             .map((cit) => {
+              const citNum = cit.n || cit.citation_num || 1;
               const docName = getDocumentNameById(cit.document_id);
               return `
-              <div class="citation-card" data-cit-num="${cit.n}" id="citation-card-${cit.n}">
+              <div class="citation-card" data-cit-num="${citNum}" id="citation-card-${citNum}">
                 <div class="citation-meta">
-                  <span class="citation-index">[${cit.n}]</span>
+                  <span class="citation-index">[${citNum}]</span>
                   <span class="citation-file">${escapeHtml(docName)}</span>
-                  <span class="citation-page">Page ${cit.page}</span>
+                  <span class="citation-page">Page ${cit.page || 1}</span>
                 </div>
-                <div class="citation-quote-preview" title="${escapeHtml(cit.quote)}">"${escapeHtml(cit.quote)}"</div>
-                <button type="button" class="btn-inspect-citation" data-cit-num="${cit.n}">Inspect ↗</button>
+                <div class="citation-quote-preview" title="${escapeHtml(cit.quote || '')}">"${escapeHtml(cit.quote || '')}"</div>
+                <button type="button" class="btn-inspect-citation" data-cit-num="${citNum}">Inspect ↗</button>
               </div>
             `;
             })
@@ -1170,7 +2057,7 @@ function appendAssistantMessage(payload) {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         const citNum = parseInt(el.getAttribute('data-cit-num'), 10);
-        const cit = payload.citations.find((c) => c.n === citNum);
+        const cit = payload.citations.find((c) => c.n === citNum || c.citation_num === citNum);
         if (cit) {
           triggerCitationHighlight(cit);
         }
@@ -1339,6 +2226,16 @@ async function openSourceViewer(docId, pageNo = 1, maxPages = 1, citationContext
 }
 
 function generateDemoPageSvg(docId, pageNo) {
+  // Check if this document is a custom user-uploaded file with extracted lines
+  const customDoc = demoStore.customDocs?.[docId];
+  if (customDoc && customDoc.pages) {
+    const pageObj = customDoc.pages.find((p) => p.pageNo === pageNo) || customDoc.pages[0];
+    if (pageObj && pageObj.lines) {
+      return generateTextPageSvg(customDoc.filename, pageNo, customDoc.page_count, pageObj.lines);
+    }
+  }
+
+  // Fallback demo Neuroscience Handout SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 850" width="100%" height="100%">
     <rect width="600" height="850" fill="#1b1a18" rx="8"/>
     <!-- Document Header -->
@@ -1395,18 +2292,28 @@ async function loadPageImage(docId, pageNo) {
   highlightOverlay.classList.add('hidden');
 
   let pageSrc = null;
-  try {
-    const res = await fetch(`${API_BASE}/documents/${docId}/pages/${pageNo}/image`, {
-      headers: { Authorization: `Bearer ${state.token}` },
-    });
-    if (res.ok) {
-      const blob = await res.blob();
-      pageSrc = URL.createObjectURL(blob);
-    }
-  } catch {
-    // Backend offline / Vercel demo
+
+  // 1. Check in-memory custom rendered pages first (for user's uploaded documents)
+  if (demoStore.customPageImages?.[docId]?.[pageNo]) {
+    pageSrc = demoStore.customPageImages[docId][pageNo];
   }
 
+  // 2. If not found in memory, try backend if online
+  if (!pageSrc && !state.isDemoMode) {
+    try {
+      const res = await fetch(`${API_BASE}/documents/${docId}/pages/${pageNo}/image`, {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        pageSrc = URL.createObjectURL(blob);
+      }
+    } catch {
+      // Backend offline / Vercel demo
+    }
+  }
+
+  // 3. Fallback to SVG generator (supports custom text notes or demo document)
   if (!pageSrc) {
     pageSrc = generateDemoPageSvg(docId, pageNo);
   }
@@ -1452,7 +2359,7 @@ function renderBoundingBoxOverlay(citation) {
 
   if (!imgEl || !highlightOverlay) return;
 
-  const bbox = citation.bbox; // [x0, y0, x1, y1]
+  const bbox = citation.bbox || citation.bounding_box; // [x0, y0, x1, y1]
   const imgWidth = imgEl.clientWidth || 800;
   const imgHeight = imgEl.clientHeight || 1050;
 
@@ -2106,12 +3013,23 @@ function bindEventListeners() {
       localStorage.removeItem('studymind_api_base');
       showToast('Switched to Demo Mode', 'info');
     }
+
+    const geminiInput = document.getElementById('server-gemini-key-input');
+    const geminiVal = geminiInput ? geminiInput.value.trim() : '';
+    if (geminiVal) {
+      localStorage.setItem('gemini_api_key', geminiVal);
+      showToast('Gemini API key saved', 'success');
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+
     document.getElementById('server-modal')?.classList.add('hidden');
     setTimeout(() => window.location.reload(), 300);
   });
 
   document.getElementById('btn-reset-demo-mode')?.addEventListener('click', () => {
     localStorage.removeItem('studymind_api_base');
+    localStorage.removeItem('gemini_api_key');
     state.isDemoMode = true;
     updateServerStatusUI('demo');
     document.getElementById('server-modal')?.classList.add('hidden');

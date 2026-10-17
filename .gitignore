@@ -94,3 +94,6 @@ node_modules/
 .next/
 out/
 .vercel/
+
+# Eval reports generated during tests
+eval/reports/
