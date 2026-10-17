@@ -155,6 +155,12 @@
         </div>
 
         <div class="nav-stage-right">
+          <!-- Backend Connection Status Pill -->
+          <button id="btn-server-status" class="btn-server-status" title="Backend Connection Settings">
+            <span class="status-indicator-dot demo" id="server-status-dot"></span>
+            <span id="server-status-label">Demo Mode</span>
+          </button>
+
           <!-- Toggle Source Document Inspector -->
           <button id="btn-toggle-source-viewer" class="btn-viewer-toggle" title="Inspect Source Documents with Bounding Boxes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -677,6 +683,39 @@
             <input type="text" id="new-workspace-name" class="form-input" placeholder="e.g. Physics 101 or Bio Chem" required>
           </div>
           <button id="btn-create-workspace-submit" type="submit" class="btn-submit">Create Workspace</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Backend Connection Settings Modal -->
+    <div id="server-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h3>Backend Server Connection</h3>
+            <p class="modal-subtitle">Connect to your local or deployed FastAPI server</p>
+          </div>
+          <button id="btn-close-server-modal" class="btn-icon-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="server-status-card">
+          <div class="server-status-row">
+            <span class="status-indicator-dot demo" id="server-modal-dot"></span>
+            <span id="server-modal-status-text">Interactive Demo Mode Active</span>
+          </div>
+          <p class="server-info-note">
+            The frontend runs offline in Demo Mode with preloaded materials, or can connect to any FastAPI server URL.
+          </p>
+        </div>
+        <form id="server-config-form" class="auth-form">
+          <div class="form-group">
+            <label for="server-api-url-input">API Server Base URL</label>
+            <input type="text" id="server-api-url-input" class="form-input" placeholder="http://127.0.0.1:8000 or https://api.yourdomain.com">
+            <span class="input-hint" style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; display:block;">Default local backend is <code>http://127.0.0.1:8000</code></span>
+          </div>
+          <div class="server-form-actions">
+            <button type="submit" class="btn-submit">Save &amp; Connect</button>
+            <button type="button" id="btn-reset-demo-mode" class="btn-demo">Reset to Demo Mode</button>
+          </div>
         </form>
       </div>
     </div>

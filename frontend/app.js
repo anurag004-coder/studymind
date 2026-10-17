@@ -26,13 +26,403 @@ const state = {
   viewerZoom: 1.0,
   activeCitation: null,
   strictMode: false,
+  isDemoMode: false,
 };
+
+// ============================================================================
+// Standalone Demo Store & Mock Router (Offline & Vercel Preview)
+// ============================================================================
+
+const demoStore = {
+  workspaces: [
+    {
+      id: 'ws-demo-neuro',
+      name: 'Neuroscience 101 (Demo)',
+      document_count: 2,
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ],
+  documents: {
+    'ws-demo-neuro': [
+      {
+        id: 'doc-demo-dopamine',
+        filename: 'dopamine_learning_notes.pdf',
+        page_count: 3,
+        status: 'ready',
+        chunk_count: 6,
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+      },
+      {
+        id: 'doc-demo-cortex',
+        filename: 'prefrontal_cortex_summary.txt',
+        page_count: 2,
+        status: 'ready',
+        chunk_count: 4,
+        created_at: new Date(Date.now() - 7200000).toISOString(),
+      },
+    ],
+  },
+  conversations: {
+    'ws-demo-neuro': [
+      {
+        id: 'conv-demo-1',
+        title: 'Dopamine & Prefrontal Cortex Overview',
+        updated_at: new Date().toISOString(),
+      },
+    ],
+  },
+  messages: {
+    'conv-demo-1': [
+      {
+        id: 'msg-demo-1',
+        role: 'user',
+        content: 'What is the primary function of dopamine in reinforcement learning?',
+        created_at: new Date(Date.now() - 120000).toISOString(),
+      },
+      {
+        id: 'msg-demo-2',
+        role: 'assistant',
+        content: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway [1]. When an outcome is better than anticipated, phasic dopamine release reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex and striatum [2].',
+        created_at: new Date(Date.now() - 110000).toISOString(),
+        citations: [
+          {
+            citation_num: 1,
+            document_id: 'doc-demo-dopamine',
+            page: 1,
+            quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+            bounding_box: [60, 160, 520, 200],
+          },
+          {
+            citation_num: 2,
+            document_id: 'doc-demo-dopamine',
+            page: 1,
+            quote: 'reinforces associated behavioral actions, facilitating synaptic plasticity in the prefrontal cortex',
+            bounding_box: [60, 205, 540, 245],
+          },
+        ],
+        confidence: 'high',
+        verification_status: 'grounded',
+      },
+    ],
+  },
+  flashcards: [
+    {
+      question: 'What type of error signal does phasic dopamine release represent in reinforcement learning?',
+      answer: 'A reward-prediction error signal in the mesolimbic pathway, indicating when outcomes exceed expectations.',
+      citation_quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+      document_id: 'doc-demo-dopamine',
+      page: 1,
+    },
+    {
+      question: 'Which cortical region receives mesocortical dopamine projections to regulate working memory?',
+      answer: 'The Prefrontal Cortex (PFC), modulating sustained attention and active representations.',
+      citation_quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+      document_id: 'doc-demo-dopamine',
+      page: 2,
+    },
+    {
+      question: 'How does optimal D1 receptor stimulation affect cortical pyramidal neurons?',
+      answer: 'It enhances the signal-to-noise ratio in cortical pyramidal neurons during challenging cognitive tasks.',
+      citation_quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+      document_id: 'doc-demo-dopamine',
+      page: 2,
+    },
+    {
+      question: 'What curve describes the cognitive performance relationship with dopamine D1 stimulation?',
+      answer: 'The classic inverted-U dopamine response curve, where both deficiency and excess impair performance.',
+      citation_quote: 'producing the classic inverted-U dopamine response curve.',
+      document_id: 'doc-demo-dopamine',
+      page: 2,
+    },
+  ],
+};
+
+function handleMockApiRequest(endpoint, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const cleanEp = endpoint.split('?')[0];
+
+  // 1. Auth routes
+  if (cleanEp === '/auth/guest') {
+    return {
+      access_token: 'demo-guest-token-' + Date.now(),
+      token_type: 'bearer',
+      user: { id: 'usr-guest-demo', email: 'guest_student@studymind.io' },
+      workspace_id: 'ws-demo-neuro',
+      is_guest: true,
+    };
+  }
+  if (cleanEp === '/auth/login' || cleanEp === '/auth/register') {
+    return {
+      access_token: 'demo-student-token-' + Date.now(),
+      token_type: 'bearer',
+    };
+  }
+  if (cleanEp === '/auth/me') {
+    return {
+      id: state.isGuest ? 'usr-guest-demo' : 'usr-student-demo',
+      email: state.isGuest ? 'guest_student@studymind.io' : 'student@studymind.io',
+      full_name: state.isGuest ? 'Guest Student' : 'Demo Student',
+    };
+  }
+
+  // 2. Workspaces
+  if (cleanEp === '/workspaces') {
+    if (method === 'POST') {
+      const body = options.body ? JSON.parse(options.body) : {};
+      const newWs = {
+        id: 'ws-' + Date.now(),
+        name: body.name || 'New Study Workspace',
+        document_count: 0,
+        created_at: new Date().toISOString(),
+      };
+      demoStore.workspaces.push(newWs);
+      demoStore.documents[newWs.id] = [];
+      demoStore.conversations[newWs.id] = [];
+      return newWs;
+    }
+    return demoStore.workspaces;
+  }
+
+  // 3. Documents
+  const wsDocsMatch = cleanEp.match(/^\/workspaces\/([^\/]+)\/documents$/);
+  if (wsDocsMatch) {
+    const wsId = wsDocsMatch[1];
+    if (method === 'POST') {
+      const newDocId = 'doc-' + Date.now();
+      let filename = 'uploaded_notes.pdf';
+      if (options.body instanceof FormData) {
+        const f = options.body.get('file');
+        if (f && f.name) filename = f.name;
+      }
+      const newDoc = {
+        id: newDocId,
+        filename,
+        page_count: 3,
+        status: 'ready',
+        chunk_count: 6,
+        created_at: new Date().toISOString(),
+      };
+      if (!demoStore.documents[wsId]) demoStore.documents[wsId] = [];
+      demoStore.documents[wsId].unshift(newDoc);
+      return { document_id: newDocId, status: 'ready', message: 'Document ingested successfully' };
+    }
+    return demoStore.documents[wsId] || [];
+  }
+
+  const docReprocessMatch = cleanEp.match(/^\/documents\/([^\/]+)\/reprocess$/);
+  if (docReprocessMatch) {
+    return { status: 'ready', message: 'Reprocessed' };
+  }
+
+  const docDeleteMatch = cleanEp.match(/^\/documents\/([^\/]+)$/);
+  if (docDeleteMatch && method === 'DELETE') {
+    const dId = docDeleteMatch[1];
+    for (const wsKey in demoStore.documents) {
+      demoStore.documents[wsKey] = demoStore.documents[wsKey].filter((d) => d.id !== dId);
+    }
+    return { message: 'Document deleted' };
+  }
+
+  // 4. Conversations
+  const wsConvsMatch = cleanEp.match(/^\/workspaces\/([^\/]+)\/conversations$/);
+  if (wsConvsMatch) {
+    const wsId = wsConvsMatch[1];
+    if (method === 'POST') {
+      const body = options.body ? JSON.parse(options.body) : {};
+      const newConv = {
+        id: 'conv-' + Date.now(),
+        title: body.title || 'New Study Chat',
+        updated_at: new Date().toISOString(),
+      };
+      if (!demoStore.conversations[wsId]) demoStore.conversations[wsId] = [];
+      demoStore.conversations[wsId].unshift(newConv);
+      demoStore.messages[newConv.id] = [];
+      return newConv;
+    }
+    return demoStore.conversations[wsId] || [];
+  }
+
+  // 5. Messages
+  const convMsgsMatch = cleanEp.match(/^\/conversations\/([^\/]+)\/messages$/);
+  if (convMsgsMatch) {
+    const convId = convMsgsMatch[1];
+    if (method === 'POST') {
+      const body = options.body ? JSON.parse(options.body) : {};
+      const userText = body.content || '';
+      const userMsg = {
+        id: 'msg-' + Date.now(),
+        role: 'user',
+        content: userText,
+        created_at: new Date().toISOString(),
+      };
+      if (!demoStore.messages[convId]) demoStore.messages[convId] = [];
+      demoStore.messages[convId].push(userMsg);
+
+      const assistantMsg = {
+        id: 'msg-' + (Date.now() + 1),
+        role: 'assistant',
+        content: `Based on your uploaded course notes, the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory and sustained attention [1]. Experimental evidence demonstrates that optimal D1 receptor stimulation enhances the signal-to-noise ratio in cortical pyramidal neurons [2].`,
+        created_at: new Date().toISOString(),
+        citations: [
+          {
+            citation_num: 1,
+            document_id: 'doc-demo-dopamine',
+            page: 2,
+            quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory',
+            bounding_box: [60, 480, 520, 520],
+          },
+          {
+            citation_num: 2,
+            document_id: 'doc-demo-dopamine',
+            page: 2,
+            quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+            bounding_box: [60, 520, 520, 555],
+          },
+        ],
+        confidence: 'high',
+        verification_status: 'grounded',
+      };
+      demoStore.messages[convId].push(assistantMsg);
+      return assistantMsg;
+    }
+    return demoStore.messages[convId] || [];
+  }
+
+  // 6. Study Tools
+  if (cleanEp.includes('/study/flashcards')) {
+    return { flashcards: demoStore.flashcards };
+  }
+  if (cleanEp.includes('/study/summary')) {
+    return {
+      title: 'Chapter 4: Dopaminergic Signaling & Cognitive Control',
+      summary: 'Dopamine projections from the ventral tegmental area (VTA) and substantia nigra modulate both motor execution and executive cognitive functions. Phasic dopamine signals encode reward-prediction errors in the mesolimbic pathway, while tonic mesocortical signals in the prefrontal cortex sustain active working memory representations via D1 receptors.',
+      key_points: [
+        'Phasic bursts communicate reward prediction errors facilitating reinforcement learning [1].',
+        'Mesocortical projections to the PFC gate distractors and stabilize mental representations [2].',
+        'D1 receptor modulation follows an inverted-U performance profile across working memory tasks [2].'
+      ],
+      citations: [
+        {
+          citation_num: 1,
+          document_id: 'doc-demo-dopamine',
+          page: 1,
+          quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.',
+        },
+        {
+          citation_num: 2,
+          document_id: 'doc-demo-dopamine',
+          page: 2,
+          quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons',
+        },
+      ],
+    };
+  }
+  if (cleanEp.includes('/study/qa')) {
+    return {
+      questions: [
+        {
+          marks: 1,
+          question: 'What error signal does phasic dopamine release encode in the mesolimbic pathway?',
+          answer: 'It encodes a reward-prediction error signal indicating an outcome superior to expectation [1].',
+          citations: [{ citation_num: 1, document_id: 'doc-demo-dopamine', page: 1, quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.' }]
+        },
+        {
+          marks: 3,
+          question: 'Explain how D1 receptor stimulation in the prefrontal cortex influences working memory performance.',
+          answer: 'Mesocortical dopamine projections innervate the PFC [1]. Moderate D1 stimulation increases signal-to-noise ratio in pyramidal neurons [2], while excessive or inadequate levels disrupt delay-period firing, displaying an inverted-U relationship.',
+          citations: [
+            { citation_num: 1, document_id: 'doc-demo-dopamine', page: 2, quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory' },
+            { citation_num: 2, document_id: 'doc-demo-dopamine', page: 2, quote: 'optimal D1 receptor stimulation enhances signal-to-noise ratio in cortical pyramidal neurons' }
+          ]
+        }
+      ]
+    };
+  }
+  if (cleanEp.includes('/study/items')) {
+    return { items: demoStore.flashcards.map((f, idx) => ({ id: 'item-' + idx, type: 'flashcard', payload: f })) };
+  }
+
+  // 7. Quiz & Practice
+  if (cleanEp.includes('/study/quiz') || cleanEp.includes('/quizzes')) {
+    return {
+      session_id: 'sess-demo-' + Date.now(),
+      questions: [
+        {
+          id: 'q-demo-1',
+          type: 'mcq',
+          marks: 1,
+          question: 'In reinforcement learning models, what does phasic dopamine discharge signify?',
+          options: [
+            'Baseline metabolic activity in the cerebellum',
+            'A reward-prediction error signal',
+            'Inhibition of sympathetic neurotransmission',
+            'Permanent depletion of serotonin vesicles'
+          ],
+          citation: { document_id: 'doc-demo-dopamine', page: 1, quote: 'Dopamine serves as a critical reward-prediction error signal in the mesolimbic pathway.' }
+        },
+        {
+          id: 'q-demo-2',
+          type: 'mcq',
+          marks: 1,
+          question: 'Which cortical region is targeted by the mesocortical dopamine tract for working memory regulation?',
+          options: [
+            'Prefrontal Cortex (PFC)',
+            'Primary Occipital Cortex (V1)',
+            'Auditory Cortex (A1)',
+            'Somatosensory Strip (S1)'
+          ],
+          citation: { document_id: 'doc-demo-dopamine', page: 2, quote: 'the mesocortical projection directs dopamine to the prefrontal cortex to govern working memory' }
+        }
+      ]
+    };
+  }
+  if (cleanEp.includes('/answers')) {
+    return { status: 'recorded', correct: true, feedback: 'Correct! Verified against Chapter 4 excerpt.' };
+  }
+  if (cleanEp.includes('/submit')) {
+    return { score: 2, total_marks: 2, percentage: 100, topic_breakdown: { 'Dopamine Pathways': 100 } };
+  }
+  if (cleanEp.includes('/feedback') || cleanEp.includes('/report')) {
+    return { status: 'recorded', message: 'Feedback saved' };
+  }
+
+  return { status: 'ok', demo: true };
+}
+
+function updateServerStatusUI(mode) {
+  const label = document.getElementById('server-status-label');
+  const dot = document.getElementById('server-status-dot');
+  const modalDot = document.getElementById('server-modal-dot');
+  const modalText = document.getElementById('server-modal-status-text');
+  const urlInput = document.getElementById('server-api-url-input');
+
+  const currentBase = localStorage.getItem('studymind_api_base');
+  if (urlInput && currentBase) {
+    urlInput.value = currentBase;
+  }
+
+  if (mode === 'connected' && currentBase) {
+    if (label) label.textContent = 'Backend Online';
+    if (dot) { dot.className = 'status-indicator-dot'; }
+    if (modalDot) { modalDot.className = 'status-indicator-dot'; }
+    if (modalText) modalText.textContent = `Connected to ${currentBase}`;
+  } else {
+    if (label) label.textContent = 'Demo Mode';
+    if (dot) { dot.className = 'status-indicator-dot demo'; }
+    if (modalDot) { modalDot.className = 'status-indicator-dot demo'; }
+    if (modalText) modalText.textContent = 'Interactive Standalone Demo Mode (Preloaded Materials)';
+  }
+}
 
 // ============================================================================
 // API Client
 // ============================================================================
 
 async function apiRequest(endpoint, options = {}) {
+  if (state.isDemoMode) {
+    return handleMockApiRequest(endpoint, options);
+  }
+
   const headers = options.headers || {};
   if (state.token) {
     headers['Authorization'] = `Bearer ${state.token}`;
@@ -58,10 +448,23 @@ async function apiRequest(endpoint, options = {}) {
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       const msg = data?.error?.message || data?.detail || `API error (${res.status})`;
+      if (res.status === 404 || res.status === 405 || res.status >= 500) {
+        console.warn(`API returned ${res.status} for ${endpoint}. Activating demo mode fallback.`);
+        state.isDemoMode = true;
+        updateServerStatusUI('demo');
+        return handleMockApiRequest(endpoint, options);
+      }
       throw new Error(msg);
     }
+    updateServerStatusUI('connected');
     return data;
   } catch (err) {
+    if (err.name === 'TypeError' || err.message.includes('fetch') || err.message.includes('NetworkError')) {
+      console.warn(`Connection failed to ${API_BASE}${endpoint}. Activating demo mode fallback.`);
+      state.isDemoMode = true;
+      updateServerStatusUI('demo');
+      return handleMockApiRequest(endpoint, options);
+    }
     console.error(`API Error [${endpoint}]:`, err);
     throw err;
   }
@@ -128,11 +531,21 @@ async function startGuestSession() {
     localStorage.setItem('studymind_is_guest', 'true');
     updateUserNavUI();
     showAuthModal(false);
-    showToast('Active in Guest Mode. Upload documents & start studying!', 'info');
+    showToast(state.isDemoMode ? 'Entered Guest Mode (Demo Materials Active)' : 'Active in Guest Mode. Upload documents & start studying!', 'info');
     await loadWorkspaces();
   } catch (err) {
-    console.error('Failed to start guest session:', err);
-    showAuthModal(true);
+    console.warn('Backend unavailable, switching to Interactive Demo Mode:', err);
+    state.token = 'demo-guest-token-' + Date.now();
+    state.user = { id: 'usr-guest-demo', email: 'guest_student@studymind.io' };
+    state.isGuest = true;
+    state.isDemoMode = true;
+    localStorage.setItem('studymind_token', state.token);
+    localStorage.setItem('studymind_is_guest', 'true');
+    updateUserNavUI();
+    updateServerStatusUI('demo');
+    showAuthModal(false);
+    showToast('Active in Demo Mode: sample study materials loaded!', 'success');
+    await loadWorkspaces();
   }
 }
 
@@ -925,6 +1338,55 @@ async function openSourceViewer(docId, pageNo = 1, maxPages = 1, citationContext
   await loadPageImage(docId, pageNo);
 }
 
+function generateDemoPageSvg(docId, pageNo) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 850" width="100%" height="100%">
+    <rect width="600" height="850" fill="#1b1a18" rx="8"/>
+    <!-- Document Header -->
+    <rect x="40" y="35" width="520" height="65" fill="#262421" rx="6" stroke="#3d3a35" stroke-width="1"/>
+    <text x="60" y="70" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="16" font-weight="700" fill="#f8fafc">Neuroscience 101 — Chapter 4: Dopaminergic Signaling</text>
+    <text x="60" y="88" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" fill="#a8a29e">Course Syllabus &amp; Lecture Handout • Page ${pageNo} of 3</text>
+    
+    <!-- Section 1 -->
+    <text x="60" y="140" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="13" font-weight="700" fill="#e07a5f">4.1 Dopamine Projections and Synaptic Plasticity</text>
+    <text x="60" y="172" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">Dopamine serves as a critical reward-prediction error signal in the mesolimbic</text>
+    <text x="60" y="190" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">pathway. When an outcome is better than anticipated, phasic dopamine release</text>
+    <text x="60" y="212" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">reinforces associated behavioral actions, facilitating synaptic plasticity in the</text>
+    <text x="60" y="230" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">prefrontal cortex and striatum through long-term potentiation (LTP).</text>
+
+    <!-- Diagram Box -->
+    <rect x="60" y="260" width="480" height="150" fill="#141311" stroke="#3d3a35" stroke-width="1.5" rx="6"/>
+    <text x="80" y="290" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" font-weight="600" fill="#81b29a">Figure 4.2 — Mesocortical vs Mesolimbic Dopamine Loop</text>
+    <rect x="85" y="315" width="115" height="40" fill="#2d3748" stroke="#4a5568" rx="4"/>
+    <text x="105" y="340" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">VTA Neurons</text>
+    <path d="M 205 335 L 255 335" stroke="#e07a5f" stroke-width="2"/>
+    <rect x="260" y="315" width="130" height="40" fill="#2d3748" stroke="#4a5568" rx="4"/>
+    <text x="275" y="340" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Nucleus Accumbens</text>
+    <path d="M 395 335 L 435 335" stroke="#e07a5f" stroke-width="2"/>
+    <rect x="440" y="315" width="85" height="40" fill="#2d3748" stroke="#4a5568" rx="4"/>
+    <text x="465" y="340" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">PFC</text>
+
+    <!-- Section 2 -->
+    <text x="60" y="455" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="13" font-weight="700" fill="#e07a5f">4.2 Working Memory Modulation via D1 Receptors</text>
+    <text x="60" y="490" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">the mesocortical projection directs dopamine to the prefrontal cortex to govern</text>
+    <text x="60" y="508" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">working memory and sustained attention. optimal D1 receptor stimulation enhances</text>
+    <text x="60" y="530" font-family="'JetBrains Mono', monospace" font-size="11" fill="#f4f1de">signal-to-noise ratio in cortical pyramidal neurons during cognitive tasks.</text>
+    <text x="60" y="560" font-family="'JetBrains Mono', monospace" font-size="11" fill="#a8a29e">Insufficient or excessive D1 stimulation results in impaired delayed-response tasks,</text>
+    <text x="60" y="578" font-family="'JetBrains Mono', monospace" font-size="11" fill="#a8a29e">producing the classic inverted-U dopamine response curve.</text>
+
+    <!-- Section 3 -->
+    <text x="60" y="625" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="13" font-weight="700" fill="#e07a5f">4.3 Summary Table &amp; Key Receptors</text>
+    <rect x="60" y="640" width="480" height="90" fill="#141311" stroke="#3d3a35" stroke-width="1" rx="4"/>
+    <text x="75" y="665" font-family="'JetBrains Mono', monospace" font-size="10.5" fill="#81b29a">D1-like (D1, D5): Gs-coupled, increases cAMP, regulates PFC delay firing</text>
+    <text x="75" y="690" font-family="'JetBrains Mono', monospace" font-size="10.5" fill="#81b29a">D2-like (D2, D3, D4): Gi-coupled, decreases cAMP, inhibits firing threshold</text>
+    <text x="75" y="715" font-family="'JetBrains Mono', monospace" font-size="10.5" fill="#81b29a">Target Pathology: Parkinson's (substantia nigra), ADHD (PFC network tuning)</text>
+
+    <!-- Footer Note -->
+    <line x1="60" y1="780" x2="540" y2="780" stroke="#3d3a35" stroke-width="1"/>
+    <text x="60" y="805" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="10" fill="#78716c">StudyMind Grounded Document Verification • Source ID: ${docId || 'doc-demo'}</text>
+  </svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
 async function loadPageImage(docId, pageNo) {
   const imgEl = document.getElementById('viewer-page-image');
   const highlightOverlay = document.getElementById('source-highlight-box');
@@ -932,32 +1394,36 @@ async function loadPageImage(docId, pageNo) {
   // Hide highlight until positioned
   highlightOverlay.classList.add('hidden');
 
+  let pageSrc = null;
   try {
     const res = await fetch(`${API_BASE}/documents/${docId}/pages/${pageNo}/image`, {
       headers: { Authorization: `Bearer ${state.token}` },
     });
-    if (!res.ok) {
-      throw new Error(`Failed to load page image (${res.status})`);
+    if (res.ok) {
+      const blob = await res.blob();
+      pageSrc = URL.createObjectURL(blob);
     }
-    const blob = await res.blob();
-    imgEl.src = URL.createObjectURL(blob);
-
-    imgEl.onload = () => {
-      // If we have an active citation for this page, re-apply bounding box overlay
-      if (
-        state.activeCitation &&
-        (!state.activeCitation.document_id || state.activeCitation.document_id === docId) &&
-        (!state.activeCitation.page || state.activeCitation.page === pageNo)
-      ) {
-        renderBoundingBoxOverlay(state.activeCitation);
-      } else {
-        highlightOverlay.classList.add('hidden');
-      }
-    };
-  } catch (err) {
-    console.error('Failed to load page image:', err);
-    showToast('Failed to load page preview', 'error');
+  } catch {
+    // Backend offline / Vercel demo
   }
+
+  if (!pageSrc) {
+    pageSrc = generateDemoPageSvg(docId, pageNo);
+  }
+
+  imgEl.src = pageSrc;
+  imgEl.onload = () => {
+    // If we have an active citation for this page, re-apply bounding box overlay
+    if (
+      state.activeCitation &&
+      (!state.activeCitation.document_id || state.activeCitation.document_id === docId) &&
+      (!state.activeCitation.page || state.activeCitation.page === pageNo)
+    ) {
+      renderBoundingBoxOverlay(state.activeCitation);
+    } else {
+      highlightOverlay.classList.add('hidden');
+    }
+  };
 }
 
 function triggerCitationHighlight(citation) {
@@ -1603,8 +2069,54 @@ function bindEventListeners() {
       showToast('Signed in with Demo Student Account!', 'success');
       await loadWorkspaces();
     } catch (err) {
-      showToast(`Demo login error: ${err.message}`, 'error');
+      console.warn('Backend unavailable, switching to Demo Student Account:', err);
+      state.token = 'demo-student-token';
+      state.user = { id: 'usr-student-demo', email: demoEmail };
+      state.isGuest = false;
+      state.isDemoMode = true;
+      localStorage.setItem('studymind_token', state.token);
+      updateUserNavUI();
+      updateServerStatusUI('demo');
+      showAuthModal(false);
+      showToast('Signed in with Demo Student Account (Demo Mode)', 'success');
+      await loadWorkspaces();
     }
+  });
+
+  // Server Connection Settings Modal Listeners
+  document.getElementById('btn-server-status')?.addEventListener('click', () => {
+    const currentBase = localStorage.getItem('studymind_api_base') || (API_BASE.startsWith('http') ? API_BASE : '');
+    const input = document.getElementById('server-api-url-input');
+    if (input) input.value = currentBase;
+    document.getElementById('server-modal')?.classList.remove('hidden');
+  });
+
+  document.getElementById('btn-close-server-modal')?.addEventListener('click', () => {
+    document.getElementById('server-modal')?.classList.add('hidden');
+  });
+
+  document.getElementById('server-config-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('server-api-url-input');
+    const val = input ? input.value.trim().replace(/\/$/, '') : '';
+    if (val) {
+      localStorage.setItem('studymind_api_base', val);
+      showToast(`Connecting to ${val}...`, 'info');
+    } else {
+      localStorage.removeItem('studymind_api_base');
+      showToast('Switched to Demo Mode', 'info');
+    }
+    document.getElementById('server-modal')?.classList.add('hidden');
+    setTimeout(() => window.location.reload(), 300);
+  });
+
+  document.getElementById('btn-reset-demo-mode')?.addEventListener('click', () => {
+    localStorage.removeItem('studymind_api_base');
+    state.isDemoMode = true;
+    updateServerStatusUI('demo');
+    document.getElementById('server-modal')?.classList.add('hidden');
+    showToast('Reset to Interactive Demo Mode', 'info');
+    setTimeout(() => window.location.reload(), 300);
   });
 
   // Feedback Modal
